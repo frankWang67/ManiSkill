@@ -42,6 +42,7 @@ class FlattenRGBDObservationWrapper(gym.ObservationWrapper):
         self.base_env.update_obs_space(new_obs)
 
     def observation(self, observation: dict):
+        joint_state = observation.pop("agent")
         sensor_data = observation.pop("sensor_data")
         del observation["sensor_param"]
         rgb_images = []
@@ -60,9 +61,13 @@ class FlattenRGBDObservationWrapper(gym.ObservationWrapper):
         observation = common.flatten_state_dict(
             observation, use_torch=True, device=self.base_env.device
         )
+        joint_state = common.flatten_state_dict(
+            joint_state, use_torch=True, device=self.base_env.device
+        )
         ret = dict()
         if self.include_state:
             ret["state"] = observation
+            ret["joint_state"] = joint_state
         if self.include_rgb and not self.include_depth:
             ret["rgb"] = rgb_images
         elif self.include_rgb and self.include_depth:

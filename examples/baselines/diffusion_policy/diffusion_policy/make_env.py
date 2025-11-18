@@ -1,5 +1,6 @@
 from typing import Optional
 import gymnasium as gym
+import numpy as np
 import mani_skill.envs
 from mani_skill.utils import gym_utils
 from mani_skill.utils.wrappers import CPUGymWrapper, FrameStack, RecordEpisode
@@ -48,6 +49,12 @@ def make_eval_envs(
                     )
                 env.action_space.seed(seed)
                 env.observation_space.seed(seed)
+
+                if np.any(np.isnan(env.action_space.low)):
+                    env.action_space.low[np.isnan(env.action_space.low)] = -np.inf
+                if np.any(np.isnan(env.action_space.high)):
+                    env.action_space.high[np.isnan(env.action_space.high)] = np.inf
+
                 return env
 
             return thunk

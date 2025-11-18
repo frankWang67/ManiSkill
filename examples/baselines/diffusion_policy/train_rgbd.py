@@ -170,11 +170,13 @@ class SmallDemoDataset_DiffusionPolicy(Dataset):  # Load everything into memory
             self.pad_action_arm = torch.zeros(
                 (trajectories["actions"][0].shape[1] - 1,), device=device
             )
+            self.delta_control = True
             # to make the arm stay still, we pad the action with 0 in 'delta_pos' control mode
             # gripper action needs to be copied from the last action
         else:
             # NOTE for absolute joint pos control probably should pad with the final joint position action.
-            raise NotImplementedError(f"Control Mode {args.control_mode} not supported")
+            # raise NotImplementedError(f"Control Mode {args.control_mode} not supported")
+            self.delta_control = False
         self.obs_horizon, self.pred_horizon = obs_horizon, pred_horizon = (
             args.obs_horizon,
             args.pred_horizon,
@@ -227,7 +229,10 @@ class SmallDemoDataset_DiffusionPolicy(Dataset):  # Load everything into memory
             act_seq = torch.cat([act_seq[0].repeat(-start, 1), act_seq], dim=0)
         if end > L:  # pad after the trajectory
             gripper_action = act_seq[-1, -1]  # assume gripper is with pos controller
-            pad_action = torch.cat((self.pad_action_arm, gripper_action[None]), dim=0)
+            if self.delta_control:
+                pad_action = torch.cat((self.pad_action_arm, gripper_action[None]), dim=0)
+            else:
+                pad_action = act_seq[-1]
             act_seq = torch.cat([act_seq, pad_action.repeat(end - L, 1)], dim=0)
             # making the robot (arm and gripper) stay still
         assert (
@@ -253,9 +258,9 @@ class Agent(nn.Module):
             len(env.single_observation_space["state"].shape) == 2
         )  # (obs_horizon, obs_dim)
         assert len(env.single_action_space.shape) == 1  # (act_dim, )
-        assert (env.single_action_space.high == 1).all() and (
-            env.single_action_space.low == -1
-        ).all()
+        # assert (env.single_action_space.high == 1).all() and (
+        #     env.single_action_space.low == -1
+        # ).all()
         # denoising results will be clipped to [-1,1], so the action should be in [-1,1] as well
         self.act_dim = env.single_action_space.shape[0]
         obs_state_dim = env.single_observation_space["state"].shape[1]
@@ -283,7 +288,8 @@ class Agent(nn.Module):
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=self.num_diffusion_iters,
             beta_schedule="squaredcos_cap_v2",  # has big impact on performance, try not to change
-            clip_sample=True,  # clip output to [-1,1] to improve stability
+            # clip_sample=True,  # clip output to [-1,1] to improve stability
+            clip_sample=False,
             prediction_type="epsilon",  # predict noise (instead of denoised action)
         )
 
