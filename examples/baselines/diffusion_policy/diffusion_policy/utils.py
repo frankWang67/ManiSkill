@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from gymnasium import spaces
 from h5py import Dataset, File, Group
 from torch.utils.data.sampler import Sampler
-
+from mani_skill.utils.geometry import rotation_conversions
 
 class IterationBasedBatchSampler(Sampler):
     """Wraps a BatchSampler.
@@ -154,21 +154,24 @@ def convert_obs(obs, concat_fn, transpose_fn, state_obs_extractor, depth = True)
     if "depth" in new_img_dict and isinstance(new_img_dict['depth'], torch.Tensor): # MS2 vec env uses float16, but gym AsyncVecEnv uses float32
         new_img_dict['depth'] = new_img_dict['depth'].to(torch.float16)
 
-    # Unified version
-    states_to_stack = state_obs_extractor(obs)
-    for j in range(len(states_to_stack)):
-        if states_to_stack[j].dtype == np.float64:
-            states_to_stack[j] = states_to_stack[j].astype(np.float32)
-    try:
-        state = np.hstack(states_to_stack)
-    except:  # dirty fix for concat trajectory of states
-        state = np.column_stack(states_to_stack)
-    if state.dtype == np.float64:
-        for x in states_to_stack:
-            print(x.shape, x.dtype)
-        import pdb
+    # # Unified version
+    # states_to_stack = state_obs_extractor(obs)
+    # for j in range(len(states_to_stack)):
+    #     if states_to_stack[j].dtype == np.float64:
+    #         states_to_stack[j] = states_to_stack[j].astype(np.float32)
+    # try:
+    #     state = np.hstack(states_to_stack)
+    # except:  # dirty fix for concat trajectory of states
+    #     state = np.column_stack(states_to_stack)
+    # if state.dtype == np.float64:
+    #     for x in states_to_stack:
+    #         print(x.shape, x.dtype)
+    #     import pdb
 
-        pdb.set_trace()
+    #     pdb.set_trace()
+
+    # ADAPT TO MY OWN STATE_OBS_EXTRACTOR
+    state = state_obs_extractor(obs)
 
     out_dict = {
         "state": state,
@@ -211,4 +214,15 @@ def build_state_obs_extractor(env_id):
     # but in some use cases you might want to exclude e.g. obs["agent"]["qvel"] as qvel is not always something you query in the real world.
 
     # return lambda obs: list(obs["agent"].values()) + list(obs["extra"].values())
-    return lambda obs: list(obs["extra"].values())
+    # return lambda obs: list(obs["extra"].values())
+
+    def state_obs_extractor(obs):
+        x = torch.Tensor(obs["extra"]["tcp_pose"])
+        q = torch.Tensor(obs["agent"]["qpos"])
+
+        x[:, 3:6] = rotation_conversions.quaternion_to_axis_angle(x[:, 3:7])
+        x[:, -1:] = q[:, -1:]
+
+        return x.numpy()
+
+    return state_obs_extractor

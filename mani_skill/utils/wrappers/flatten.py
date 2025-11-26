@@ -8,7 +8,7 @@ from gymnasium.vector.utils import batch_space
 
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.utils import common
-
+from mani_skill.utils.geometry import rotation_conversions
 
 class FlattenRGBDObservationWrapper(gym.ObservationWrapper):
     """
@@ -68,6 +68,8 @@ class FlattenRGBDObservationWrapper(gym.ObservationWrapper):
         if self.include_state:
             ret["state"] = observation
             ret["joint_state"] = joint_state
+            ret["state"][:, 3:6] = rotation_conversions.quaternion_to_axis_angle(ret["state"][:, 3:7])
+            ret["state"][:, -1] = ret["joint_state"][:, ret["joint_state"].shape[1] // 2 - 1]
         if self.include_rgb and not self.include_depth:
             ret["rgb"] = rgb_images
         elif self.include_rgb and self.include_depth:

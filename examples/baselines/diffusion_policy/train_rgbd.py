@@ -132,6 +132,7 @@ class SmallDemoDataset_DiffusionPolicy(Dataset):  # Load everything into memory
         print("Raw trajectory loaded, beginning observation pre-processing...")
 
         # Pre-process the observations, make them align with the obs returned by the obs_wrapper
+        state_stack = torch.empty((0, 7), dtype=torch.float32).to(device=device)
         obs_traj_dict_list = []
         for obs_traj_dict in trajectories["observations"]:
             _obs_traj_dict = reorder_keys(
@@ -149,14 +150,27 @@ class SmallDemoDataset_DiffusionPolicy(Dataset):  # Load everything into memory
             _obs_traj_dict["state"] = torch.from_numpy(_obs_traj_dict["state"]).to(
                 device
             )
+            state_stack = torch.cat((state_stack, _obs_traj_dict["state"]), dim=0)
             obs_traj_dict_list.append(_obs_traj_dict)
+
+        self.state_mean = state_stack.mean(dim=0, keepdim=True)
+        self.state_std = state_stack.std(dim=0, keepdim=True)
+        self.state_std = torch.clip(self.state_std, 1e-2, np.inf)  # clipping
+
         trajectories["observations"] = obs_traj_dict_list
+
         self.obs_keys = list(_obs_traj_dict.keys())
+
         # Pre-process the actions
+        action_stack = torch.empty((0, trajectories["actions"][0].shape[-1]), dtype=torch.float32).to(device=device)
         for i in range(len(trajectories["actions"])):
             trajectories["actions"][i] = torch.Tensor(trajectories["actions"][i]).to(
                 device=device
             )
+            action_stack = torch.cat((action_stack, trajectories["actions"][i]), dim=0)
+        self.action_mean = action_stack.mean(dim=0, keepdim=True)
+        self.action_std = action_stack.std(dim=0, keepdim=True)
+        self.action_std = torch.clip(self.action_std, 1e-2, np.inf)  # clipping
         print(
             "Obs/action pre-processing is done, start to pre-compute the slice indices..."
         )
@@ -249,11 +263,15 @@ class SmallDemoDataset_DiffusionPolicy(Dataset):  # Load everything into memory
 
 
 class Agent(nn.Module):
-    def __init__(self, env: VectorEnv, args: Args):
+    def __init__(self, env: VectorEnv, args: Args, state_mean, state_std, action_mean, action_std):
         super().__init__()
         self.obs_horizon = args.obs_horizon
         self.act_horizon = args.act_horizon
         self.pred_horizon = args.pred_horizon
+        self.state_mean = state_mean
+        self.state_std = state_std
+        self.action_mean = action_mean
+        self.action_std = action_std
         assert (
             len(env.single_observation_space["state"].shape) == 2
         )  # (obs_horizon, obs_dim)
@@ -310,8 +328,9 @@ class Agent(nn.Module):
         visual_feature = visual_feature.reshape(
             batch_size, self.obs_horizon, visual_feature.shape[1]
         )  # (B, obs_horizon, D)
+        state = (obs_seq["state"] - self.state_mean) / self.state_std
         feature = torch.cat(
-            (visual_feature, obs_seq["state"]), dim=-1
+            (visual_feature, state), dim=-1
         )  # (B, obs_horizon, D+obs_state_dim)
         return feature.flatten(start_dim=1)  # (B, obs_horizon * (D+obs_state_dim))
 
@@ -333,7 +352,8 @@ class Agent(nn.Module):
 
         # add noise to the clean images(actions) according to the noise magnitude at each diffusion iteration
         # (this is the forward diffusion process)
-        noisy_action_seq = self.noise_scheduler.add_noise(action_seq, noise, timesteps)
+        action_seq_norm = (action_seq - self.action_mean) / self.action_std
+        noisy_action_seq = self.noise_scheduler.add_noise(action_seq_norm, noise, timesteps)
 
         # predict the noise residual
         noise_pred = self.noise_pred_net(
@@ -381,6 +401,9 @@ class Agent(nn.Module):
                     sample=noisy_action_seq,
                 ).prev_sample
 
+        # denormalize
+        noisy_action_seq = noisy_action_seq * self.action_std + self.action_mean
+
         # only take act_horizon number of actions
         start = self.obs_horizon - 1
         end = start + self.act_horizon
@@ -394,6 +417,10 @@ def save_ckpt(run_name, tag):
         {
             "agent": agent.state_dict(),
             "ema_agent": ema_agent.state_dict(),
+            "state_mean": dataset.state_mean,
+            "state_std": dataset.state_std,
+            "action_mean": dataset.action_mean,
+            "action_std": dataset.action_std,
         },
         f"runs/{run_name}/checkpoints/{tag}.pt",
     )
@@ -513,7 +540,7 @@ if __name__ == "__main__":
         persistent_workers=(args.num_dataload_workers > 0),
     )
 
-    agent = Agent(envs, args).to(device)
+    agent = Agent(envs, args, dataset.state_mean, dataset.state_std, dataset.action_mean, dataset.action_std).to(device)
 
     optimizer = optim.AdamW(
         params=agent.parameters(), lr=args.lr, betas=(0.95, 0.999), weight_decay=1e-6
@@ -531,7 +558,7 @@ if __name__ == "__main__":
     # accelerates training and improves stability
     # holds a copy of the model weights
     ema = EMAModel(parameters=agent.parameters(), power=0.75)
-    ema_agent = Agent(envs, args).to(device)
+    ema_agent = Agent(envs, args, dataset.state_mean, dataset.state_std, dataset.action_mean, dataset.action_std).to(device)
 
     best_eval_metrics = defaultdict(float)
     timings = defaultdict(float)
