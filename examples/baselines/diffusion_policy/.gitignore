@@ -1,4 +1,5 @@
 __pycache__/
 runs/
 wandb/
+evals
 *.egg-info/
