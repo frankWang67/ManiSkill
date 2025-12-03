@@ -23,7 +23,7 @@ import torch
 import torch.random
 from transforms3d.euler import euler2quat
 
-from mani_skill.agents.robots import Fetch, Panda
+from mani_skill.agents.robots import Fetch, PandaWristCam, XArm6RobotiqWristCamera, FloatingRobotiq2F85Gripper
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.sensors.camera import CameraConfig
 from mani_skill.utils import common, sapien_utils
@@ -50,16 +50,16 @@ class PushCubeEnv(BaseEnv):
 
     _sample_video_link = "https://github.com/haosulab/ManiSkill/raw/main/figures/environment_demos/PushCube-v1_rt.mp4"
 
-    SUPPORTED_ROBOTS = ["panda", "fetch"]
+    SUPPORTED_ROBOTS = ["panda_wristcam", "fetch", "xarm6_robotiq_wristcam", "floating_robotiq_2f_85_gripper"]
 
     # Specify some supported robot types
-    agent: Union[Panda, Fetch]
+    agent: Union[PandaWristCam, Fetch, XArm6RobotiqWristCamera, FloatingRobotiq2F85Gripper]
 
     # set some commonly used values
     goal_radius = 0.1
     cube_half_size = 0.02
 
-    def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
+    def __init__(self, *args, robot_uids="panda_wristcam", robot_init_qpos_noise=0.02, **kwargs):
         # specifying robot_uids="panda" as the default means gym.make("PushCube-v1") will default to using the panda arm.
         self.robot_init_qpos_noise = robot_init_qpos_noise
         super().__init__(*args, robot_uids=robot_uids, **kwargs)
@@ -75,20 +75,22 @@ class PushCubeEnv(BaseEnv):
 
     @property
     def _default_sensor_configs(self):
-        # registers one 128x128 camera looking at the robot, cube, and target
-        # a smaller sized camera will be lower quality, but render faster
-        pose = sapien_utils.look_at(eye=[0.3, 0, 0.6], target=[-0.1, 0, 0.1])
-        return [
-            CameraConfig(
-                "base_camera",
-                pose=pose,
-                width=128,
-                height=128,
-                fov=np.pi / 2,
-                near=0.01,
-                far=100,
-            )
-        ]
+        # # registers one 128x128 camera looking at the robot, cube, and target
+        # # a smaller sized camera will be lower quality, but render faster
+        # pose = sapien_utils.look_at(eye=[0.3, 0, 0.6], target=[-0.1, 0, 0.1])
+        # return [
+        #     CameraConfig(
+        #         "base_camera",
+        #         pose=pose,
+        #         width=128,
+        #         height=128,
+        #         fov=np.pi / 2,
+        #         near=0.01,
+        #         far=100,
+        #     )
+        # ]
+
+        return self.agent._sensor_configs
 
     @property
     def _default_human_render_camera_configs(self):
