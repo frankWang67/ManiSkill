@@ -23,7 +23,7 @@ import torch
 import torch.random
 from transforms3d.euler import euler2quat
 
-from mani_skill.agents.robots import Fetch, PandaWristCam, XArm6RobotiqWristCamera, FloatingRobotiq2F85Gripper
+from mani_skill.agents.robots import Fetch, PandaWristCam, UR5PandahandRealsense, XArm6RobotiqWristCamera, FloatingPandaGripperWristCam
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.sensors.camera import CameraConfig
 from mani_skill.utils import common, sapien_utils
@@ -50,10 +50,10 @@ class PushCubeEnv(BaseEnv):
 
     _sample_video_link = "https://github.com/haosulab/ManiSkill/raw/main/figures/environment_demos/PushCube-v1_rt.mp4"
 
-    SUPPORTED_ROBOTS = ["panda_wristcam", "fetch", "xarm6_robotiq_wristcam", "floating_robotiq_2f_85_gripper"]
+    SUPPORTED_ROBOTS = ["panda_wristcam", "fetch", "ur5_pandahand_realsense", "xarm6_robotiq_wristcam", "floating_panda_gripper_wristcam"]
 
     # Specify some supported robot types
-    agent: Union[PandaWristCam, Fetch, XArm6RobotiqWristCamera, FloatingRobotiq2F85Gripper]
+    agent: Union[PandaWristCam, Fetch, UR5PandahandRealsense, XArm6RobotiqWristCamera, FloatingPandaGripperWristCam]
 
     # set some commonly used values
     goal_radius = 0.1

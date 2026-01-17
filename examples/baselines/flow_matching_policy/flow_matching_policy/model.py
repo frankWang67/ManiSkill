@@ -8,10 +8,10 @@ from gymnasium.vector.vector_env import VectorEnv
 from diffusion_policy.conditional_unet1d import ConditionalUnet1D
 from diffusion_policy.plain_conv import PlainConv
 
-from flow_matching_policy.args import Args
+from flow_matching_policy.args import FlowMatchingPolicyArgs
 
 class Agent(nn.Module):
-    def __init__(self, env: VectorEnv, args: Args, action_std, device):
+    def __init__(self, env: VectorEnv, args: FlowMatchingPolicyArgs, action_std, device):
         super().__init__()
         self.obs_horizon = args.obs_horizon
         self.act_horizon = args.act_horizon
@@ -27,7 +27,7 @@ class Agent(nn.Module):
         ).all()
         # denoising results will be clipped to [-1,1], so the action should be in [-1,1] as well
         self.act_dim = env.single_action_space.shape[0]
-        obs_state_dim = env.single_observation_space["state"].shape[1]
+        self.obs_state_dim = env.single_observation_space["state"].shape[1]
         total_visual_channels = 0
         self.include_rgb = "rgb" in env.single_observation_space.keys()
         self.include_depth = "depth" in env.single_observation_space.keys()
@@ -37,13 +37,13 @@ class Agent(nn.Module):
         if self.include_depth:
             total_visual_channels += env.single_observation_space["depth"].shape[-1]
 
-        visual_feature_dim = 256
+        self.visual_feature_dim = 256
         self.visual_encoder = PlainConv(
-            in_channels=total_visual_channels, out_dim=visual_feature_dim, pool_feature_map=True
+            in_channels=total_visual_channels, out_dim=self.visual_feature_dim, pool_feature_map=True
         )
         self.vel_pred_net = ConditionalUnet1D(
             input_dim=self.act_dim,  # act_horizon is not used (U-Net doesn't care)
-            global_cond_dim=self.obs_horizon * (visual_feature_dim + obs_state_dim),
+            global_cond_dim=self.obs_horizon * (self.visual_feature_dim + self.obs_state_dim),
             diffusion_step_embed_dim=args.diffusion_step_embed_dim,
             down_dims=args.unet_dims,
             n_groups=args.n_groups,
@@ -81,7 +81,7 @@ class Agent(nn.Module):
         )  # (B, obs_horizon * obs_dim)
 
         # sample noise to add to actions
-        noise = torch.randn((B, self.pred_horizon, self.act_dim), device=self.device) * self.action_std
+        noise = torch.randn((B, self.pred_horizon, self.act_dim), device=self.device) * self.action_std * 0.1
 
         # sample a diffusion iteration for each data point
         timesteps = torch.rand(B, device=self.device) * 0.999 + 0.001
@@ -99,7 +99,7 @@ class Agent(nn.Module):
 
         return F.mse_loss(v_t, u_t)
 
-    def get_action(self, obs_seq, steps=50):
+    def get_action(self, obs_seq, steps=6):
         # init scheduler
         # self.noise_scheduler.set_timesteps(self.num_diffusion_iters)
         # set_timesteps will change noise_scheduler.timesteps is only used in noise_scheduler.step()
@@ -121,7 +121,7 @@ class Agent(nn.Module):
             # initialize action from Guassian noise
             noisy_action_seq = torch.randn(
                 (B, self.pred_horizon, self.act_dim), device=self.device
-            ) * self.action_std
+            ) * self.action_std * 0.1
 
             timesteps = torch.linspace(1.0, 0.0, steps + 1, device=self.device)  # (steps+1, )
             dt = -1.0 / steps
@@ -132,6 +132,7 @@ class Agent(nn.Module):
                     timestep=t,
                     global_cond=obs_cond,
                 )
+                # print(f"{torch.norm((vel_pred * dt)[:, :, :-1], dim=-1)=}")
 
                 noisy_action_seq = noisy_action_seq + vel_pred * dt  # Euler integration
 

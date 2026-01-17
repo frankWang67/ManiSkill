@@ -24,12 +24,12 @@ from diffusion_policy.utils import (
     worker_init_fn
 )
 
-from flow_matching_policy.args import Args
+from flow_matching_policy.args import FlowMatchingPolicyArgs
 from flow_matching_policy.model import Agent, save_ckpt
 from flow_matching_policy.dataset import SmallDemoDataset_DiffusionPolicy
 
 def train():
-    args = tyro.cli(Args)
+    args = tyro.cli(FlowMatchingPolicyArgs)
 
     if args.exp_name is None:
         args.exp_name = os.path.basename(__file__)[: -len(".py")]

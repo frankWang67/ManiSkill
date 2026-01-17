@@ -28,10 +28,13 @@ class Args:
     checkpoint_path: Optional[str] = "/home/wshf/ManiSkill/examples/baselines/diffusion_policy/evals/PushCubev1-11-26/best_eval_success_at_end.pt"
     """Checkpoint path to load"""
 
+    robot: Optional[str] = "panda_wristcam"
+    """Robot UID to use in the environment"""
+
     pause: Annotated[bool, tyro.conf.arg(aliases=["-p"])] = False
     """If using human render mode, auto pauses the simulation upon loading"""
 
-    quiet: bool = False
+    quiet: bool = True
     """Disable verbose output."""
 
 class Agent(nn.Module):
@@ -129,11 +132,19 @@ class Agent(nn.Module):
             # initialize action from Guassian noise
             noisy_action_seq = torch.randn(
                 (B, self.pred_horizon, self.act_dim), device=obs_seq["state"].device
-            )
-            
+            ) # * self.action_std + self.action_mean
+
             for k in self.noise_scheduler.timesteps:
+                # k_pad = torch.full(
+                #     (B,), k.item(), device=self.device, dtype=torch.long
+                # )
+                # alpha_prod = self.noise_scheduler.alphas_cumprod.to(self.device)[k_pad][:, None].unsqueeze(1)
+                # alpha = self.noise_scheduler.alphas.to(self.device)[k_pad][:, None].unsqueeze(1)
+                # beta = self.noise_scheduler.betas.to(self.device)[k_pad][:, None].unsqueeze(1)
+
                 # predict noise
                 noise_pred = self.noise_pred_net(
+                    # sample=(noisy_action_seq - self.action_mean) / self.action_std,
                     sample=noisy_action_seq,
                     timestep=k,
                     global_cond=obs_cond,
@@ -145,6 +156,15 @@ class Agent(nn.Module):
                     timestep=k,
                     sample=noisy_action_seq,
                 ).prev_sample
+
+                # cartesian_score = -1 / (1 - alpha_prod).sqrt() * noise_pred * self.action_std
+                # noisy_action_seq = 1 / alpha.sqrt() * (noisy_action_seq + (1 - alpha) * cartesian_score) + beta.sqrt() * torch.randn_like(noisy_action_seq)
+                # noisy_action_seq += 0.5 * beta * dk * cartesian_score + (beta * dk).sqrt() * torch.randn_like(noisy_action_seq) * self.action_std
+                # noisy_action_seq += beta * cartesian_score # + beta.sqrt() * torch.randn_like(noisy_action_seq) * self.action_std
+                # noisy_action_seq = 1 / alpha.sqrt() * (noisy_action_seq - self.action_mean + beta * cartesian_score) + self.action_mean # + beta.sqrt() * torch.randn_like(noisy_action_seq) * self.action_std
+                # noisy_action_seq += 0.1 * cartesian_score
+
+                # print(f"{beta * cartesian_score / noisy_action_seq=}")
 
         # denormalize action
         noisy_action_seq = noisy_action_seq * self.action_std + self.action_mean
@@ -197,7 +217,7 @@ def main(args: Args):
     env_kwargs.pop("env_id")
     env_kwargs.pop("env_horizon")
 
-    env = gym.make(id=model_kwargs["env_id"], **env_kwargs)
+    env = gym.make(id=model_kwargs["env_id"], robot_uids=args.robot, **env_kwargs)
     # record_dir = args.record_dir
     # if record_dir:
     #     record_dir = record_dir.format(env_id=args.env_id)
@@ -221,7 +241,7 @@ def main(args: Args):
 
     obs, _ = env.reset(seed=model_kwargs["seed"], options=dict(reconfigure=True))
     if model_kwargs["seed"] is not None and env.action_space is not None:
-            env.action_space.seed(model_kwargs["seed"][0])
+        env.action_space.seed(model_kwargs["seed"][0])
     if env_kwargs["render_mode"] == "human":
         viewer = env.render()
         if isinstance(viewer, sapien.utils.Viewer):

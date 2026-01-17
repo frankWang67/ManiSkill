@@ -129,6 +129,9 @@ class TableSceneBuilder(SceneBuilder):
             "xarm6_allegro_right",
             "xarm6_robotiq",
             "xarm6_nogripper",
+            "xarm6_robotiq_wristcam",
+            "ur5",
+            "ur5_pandahand_realsense",
         ]:
             qpos = self.env.agent.keyframes["rest"].qpos
             qpos = (
@@ -291,3 +294,32 @@ class TableSceneBuilder(SceneBuilder):
             self.env.agent.robot.set_pose(
                 sapien.Pose([-0.725, 0, 0], q=euler2quat(0, 0, np.pi / 2))
             )
+        elif self.env.robot_uids in ["floating_panda_gripper", "floating_panda_gripper_wristcam"]:
+            qpos = np.array(
+                [
+                    -0.0171+0.615,
+                    0.0146,
+                    0.1646+0.1,
+                    -3.1340,
+                    -0.0553,
+                    -1.5463,
+                    0.04,
+                    0.04,
+                ]
+            )
+            if self.env._enhanced_determinism:
+                qpos = (
+                    self.env._batched_episode_rng[env_idx].normal(
+                        0, self.robot_init_qpos_noise, len(qpos)
+                    )
+                    + qpos
+                )
+            else:
+                qpos = (
+                    self.env._episode_rng.normal(
+                        0, self.robot_init_qpos_noise, (b, len(qpos))
+                    )
+                    + qpos
+                )
+            qpos[:, -2:] = 0.04
+            self.env.agent.reset(qpos)

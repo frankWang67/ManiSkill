@@ -5,7 +5,7 @@ from gymnasium import spaces
 
 from diffusion_policy.utils import load_demo_dataset
 
-from flow_matching_policy.args import Args
+from flow_matching_policy.args import FlowMatchingPolicyArgs
 
 def reorder_keys(d, ref_dict):
     out = dict()
@@ -17,7 +17,7 @@ def reorder_keys(d, ref_dict):
     return out
 
 class SmallDemoDataset_DiffusionPolicy(Dataset):  # Load everything into memory
-    def __init__(self, data_path, obs_process_fn, obs_space, include_rgb, include_depth, device, num_traj, args: Args):
+    def __init__(self, data_path, obs_process_fn, obs_space, include_rgb, include_depth, device, num_traj, args: FlowMatchingPolicyArgs):
         self.include_rgb = include_rgb
         self.include_depth = include_depth
         trajectories = load_demo_dataset(data_path, num_traj=num_traj, concat=False)

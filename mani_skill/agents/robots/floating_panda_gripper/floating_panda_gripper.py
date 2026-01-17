@@ -143,3 +143,22 @@ class FloatingPandaGripper(BaseAgent):
         self.tcp = sapien_utils.get_obj_by_name(
             self.robot.get_links(), self.ee_link_name
         )
+
+@register_agent()
+class FloatingPandaGripperWristCam(FloatingPandaGripper):
+    uid = "floating_panda_gripper_wristcam"
+    urdf_path = f"{PACKAGE_ASSET_DIR}/robots/panda/panda_v2_gripper_wristcam.urdf"
+
+    @property
+    def _sensor_configs(self):
+        cam_config = CameraConfig(
+            uid="hand_camera",
+            pose=sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0]),
+            width=256,
+            height=256,
+            fov=np.pi * 155 / 180,
+            near=0.01,
+            far=100,
+            mount=self.robot.links_map["camera_link"],
+        )
+        return [cam_config]
