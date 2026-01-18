@@ -22,10 +22,10 @@ from typing import List, Optional, Annotated, Union
 
 @dataclass
 class Args:
-    config_file: Optional[str] = "/home/wshf/ManiSkill/examples/baselines/diffusion_policy/evals/PushCubev1-11-26/config.yaml"
+    config_file: Optional[str] = "/home/wshf/ManiSkill/examples/baselines/diffusion_policy/evals/PushCubev1-01-18/config.yaml"
     """Parameter config file to load"""
 
-    checkpoint_path: Optional[str] = "/home/wshf/ManiSkill/examples/baselines/diffusion_policy/evals/PushCubev1-11-26/best_eval_success_at_end.pt"
+    checkpoint_path: Optional[str] = "/home/wshf/ManiSkill/examples/baselines/diffusion_policy/evals/PushCubev1-01-18/best_eval_success_at_end.pt"
     """Checkpoint path to load"""
 
     robot: Optional[str] = "panda_wristcam"

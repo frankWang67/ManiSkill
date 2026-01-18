@@ -115,12 +115,12 @@ class FloatingPandaGripper(BaseAgent):
         )
         return dict(
             pd_joint_delta_pos=dict(
-                root=arm_pd_joint_delta_pos, gripper=gripper_pd_joint_pos
+                arm=arm_pd_joint_delta_pos, gripper=gripper_pd_joint_pos
             ),
-            pd_joint_pos=dict(root=arm_pd_joint_pos, gripper=gripper_pd_joint_pos),
-            pd_ee_delta_pose=dict(root=pd_ee_delta_pose, gripper=gripper_pd_joint_pos),
-            pd_ee_pose=dict(root=pd_ee_pose, gripper=gripper_pd_joint_pos),
-            pd_ee_pose_quat=dict(root=pd_ee_pose_quat, gripper=gripper_pd_joint_pos),
+            pd_joint_pos=dict(arm=arm_pd_joint_pos, gripper=gripper_pd_joint_pos),
+            pd_ee_delta_pose=dict(arm=pd_ee_delta_pose, gripper=gripper_pd_joint_pos),
+            pd_ee_pose=dict(arm=pd_ee_pose, gripper=gripper_pd_joint_pos),
+            pd_ee_pose_quat=dict(arm=pd_ee_pose_quat, gripper=gripper_pd_joint_pos),
         )
 
     @property
@@ -156,7 +156,8 @@ class FloatingPandaGripperWristCam(FloatingPandaGripper):
             pose=sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0]),
             width=256,
             height=256,
-            fov=np.pi * 155 / 180,
+            # fov=np.pi * 155 / 180,
+            fov=np.pi * 120 / 180,
             near=0.01,
             far=100,
             mount=self.robot.links_map["camera_link"],
