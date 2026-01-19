@@ -22,10 +22,10 @@ from typing import List, Optional, Annotated, Union
 
 @dataclass
 class Args:
-    config_file: Optional[str] = "/home/wshf/ManiSkill/examples/baselines/diffusion_policy/evals/PushCubev1-01-18/config.yaml"
+    config_file: Optional[str] = "/home/wshf/ManiSkill/examples/baselines/diffusion_policy/evals/PushCubev1-panda-fov155-01-09/config.yaml"
     """Parameter config file to load"""
 
-    checkpoint_path: Optional[str] = "/home/wshf/ManiSkill/examples/baselines/diffusion_policy/evals/PushCubev1-01-18/best_eval_success_at_end.pt"
+    checkpoint_path: Optional[str] = "/home/wshf/ManiSkill/examples/baselines/diffusion_policy/evals/PushCubev1-panda-fov155-01-09/best_eval_success_at_end.pt"
     """Checkpoint path to load"""
 
     robot: Optional[str] = "panda_wristcam"
@@ -104,11 +104,11 @@ class Agent(nn.Module):
         visual_feature = visual_feature.reshape(
             batch_size, self.obs_horizon, visual_feature.shape[1]
         )  # (B, obs_horizon, D)
-        state = (obs_seq["state"] - self.state_mean) / self.state_std
+        state = (obs_seq["state"].to(self.device) - self.state_mean) / self.state_std
         feature = torch.cat(
             (visual_feature, state), dim=-1
         )  # (B, obs_horizon, D+obs_state_dim)
-        return feature.flatten(start_dim=1)  # (B, obs_horizon * (D+obs_state_dim))
+        return feature.flatten(start_dim=1).to(self.device)  # (B, obs_horizon * (D+obs_state_dim))
 
     def get_action(self, obs_seq):
         # init scheduler
@@ -131,7 +131,7 @@ class Agent(nn.Module):
 
             # initialize action from Guassian noise
             noisy_action_seq = torch.randn(
-                (B, self.pred_horizon, self.act_dim), device=obs_seq["state"].device
+                (B, self.pred_horizon, self.act_dim), device=self.device
             ) # * self.action_std + self.action_mean
 
             for k in self.noise_scheduler.timesteps:
@@ -204,6 +204,7 @@ def main(args: Args):
     if model_kwargs["seed"] is not None:
         np.random.seed(model_kwargs["seed"][0])
     parallel_in_single_scene = env_kwargs["render_mode"] == "human"
+    env_kwargs["num_envs"] = 1 if env_kwargs["render_mode"] == "human" else model_kwargs["num_eval_envs"]
     if env_kwargs["render_mode"] == "human" and env_kwargs["obs_mode"] in ["sensor_data", "rgb", "rgbd", "depth", "point_cloud"]:
         print("Disabling parallel single scene/GUI render as observation mode is a visual one. Change observation mode to state or state_dict to see a parallel env render")
         parallel_in_single_scene = False
@@ -216,6 +217,7 @@ def main(args: Args):
     env_kwargs["parallel_in_single_scene"] = parallel_in_single_scene
     env_kwargs.pop("env_id")
     env_kwargs.pop("env_horizon")
+    env_kwargs.pop("robot_uids")
 
     env = gym.make(id=model_kwargs["env_id"], robot_uids=args.robot, **env_kwargs)
     # record_dir = args.record_dir
@@ -261,6 +263,8 @@ def main(args: Args):
                     print("truncated", truncated)
                     print("info", info)
                 if env_kwargs["render_mode"] == "human":
+                    if (terminated | truncated).any():
+                        break
                     env.render()
                 if env_kwargs["render_mode"] is None or env_kwargs["render_mode"] != "human":
                     if (terminated | truncated).any():
