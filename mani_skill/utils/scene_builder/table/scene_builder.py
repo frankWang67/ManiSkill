@@ -130,18 +130,24 @@ class TableSceneBuilder(SceneBuilder):
             "xarm6_robotiq",
             "xarm6_nogripper",
             "xarm6_robotiq_wristcam",
+            "xarm7_robotiq_wristcam",
             "ur5",
+            "ur5_robotiq_wristcam",
             "ur5_pandahand_realsense",
+            "panda_robotiq_wristcam",
         ]:
             qpos = self.env.agent.keyframes["rest"].qpos
-            qpos = (
-                self.env._episode_rng.normal(
-                    0, self.robot_init_qpos_noise, (b, len(qpos))
-                )
-                + qpos
-            )
+            # qpos = (
+            #     self.env._episode_rng.normal(
+            #         0, self.robot_init_qpos_noise, (b, len(qpos))
+            #     )
+            #     + qpos
+            # )
             self.env.agent.reset(qpos)
             self.env.agent.robot.set_pose(sapien.Pose([-0.522, 0, 0]))
+        elif self.env.robot_uids in ["floating_robotiq_2f_85_gripper", "floating_robotiq_2f_85_gripper_wristcam"]:
+            qpos = self.env.agent.keyframes["rest"].qpos
+            self.env.agent.reset(qpos)
         elif self.env.robot_uids == "fetch":
             qpos = np.array(
                 [

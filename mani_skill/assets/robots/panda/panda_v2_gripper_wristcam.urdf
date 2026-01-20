@@ -224,7 +224,7 @@
     <visual>
       <origin rpy="1.5707963267948966 0 1.5707963267948966" xyz="0 -0.02 0"/>
       <geometry>
-        <mesh filename="realsense2_description/meshes/d415.stl"/>
+        <mesh filename="../realsense2_description/meshes/d415.stl"/>
       </geometry>
       <material name="aluminum"/>
     </visual>

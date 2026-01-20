@@ -162,7 +162,7 @@ class BaseMotionPlanningSolver:
                 use_point_cloud=self.use_point_cloud,
             )
             if result["status"] != "Success":
-                # print(result["status"])
+                print(result["status"])
                 self.render_wait()
                 return -1
         self.render_wait()

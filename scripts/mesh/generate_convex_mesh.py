@@ -37,6 +37,7 @@ if __name__ == "__main__":
     # Get all .stl and .ply files in the folder
     mesh_files = glob.glob(os.path.join(args.folder, "*.stl"))
     mesh_files.extend(glob.glob(os.path.join(args.folder, "*.ply")))
+    mesh_files.extend(glob.glob(os.path.join(args.folder, "*.obj")))
 
     for input_path in mesh_files:
         # Skip if file is already a convex hull

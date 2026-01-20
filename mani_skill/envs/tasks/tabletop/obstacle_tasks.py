@@ -175,16 +175,16 @@ class PickFromShelfEnv(PickCubeEnv):
 
             # --- 1. Randomize Parameters ---
             # Shelf Position
-            shelf_x = torch.rand((b)) * 0.1 + 0.15
-            shelf_y = (torch.rand((b)) - 0.5) * 0.2 + 0.1
+            shelf_x = torch.rand((b)) * 0.05 + 0.05
+            shelf_y = (torch.rand((b)) - 0.5) * 0.15 + 0.25
             
             # Constrain Yaw: +/- 30 deg instead of 45 to make approach easier
-            # shelf_yaw = (torch.rand((b)) - 0.5) * np.pi / 3 
-            shelf_yaw = torch.rand((b)) * np.pi / 3 
+            shelf_yaw = torch.rand((b)) * np.pi / 6
+            shelf_yaw = np.pi / 2 - shelf_yaw
             
-            # FIX: Increased gap range [0.22, 0.28]
-            shelf_gap = torch.rand((b)) * 0.06 + 0.22 
-            bottom_z = 0.05 
+            # FIX: Increased gap range [0.14, 0.20]
+            shelf_gap = torch.rand((b)) * 0.06 + 0.14
+            bottom_z = 0.2
             
             # Rotations
             zeros = torch.zeros(b, device=self.device)
@@ -231,7 +231,7 @@ class PickFromShelfEnv(PickCubeEnv):
             goal_pos = torch.zeros((b, 3))
             goal_pos[:, 0] = -0.1
             goal_pos[:, 1] = 0.0
-            goal_pos[:, 2] = 0.05
+            goal_pos[:, 2] = self.cube_half_size
             self.goal_site.set_pose(Pose.create_from_pq(goal_pos))
 
 
@@ -266,7 +266,7 @@ class PickBehindBarrierEnv(PickCubeEnv):
             # --- 1. Randomize Barrier ---
             # FIX: Move barrier to [0.0, 0.1] range (Center to slightly Front)
             # Previous was [-0.25, -0.15] which is too close to robot base (~-0.6)
-            barrier_x = torch.rand(b) * 0.05 - 0.15
+            barrier_x = torch.rand(b) * 0.05 - 0.05
             
             target_height = torch.rand((b, 1)) * 0.1 + 0.15
             barrier_z = target_height - self.barrier_half_height

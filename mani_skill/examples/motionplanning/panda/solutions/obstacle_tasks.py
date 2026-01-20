@@ -96,10 +96,10 @@ def solveDeepBox(env, seed=None, debug=False, vis=False):
     res = planner.move_to_pose_with_screw(goal_pose)
     
     # Step F: 张开夹爪 (放置)
-    planner.open_gripper()
+    res = planner.open_gripper()
     
     # Step G: 垂直抬起 (离场)
-    planner.move_to_pose_with_screw(pre_place_pose)
+    res = planner.move_to_pose_with_screw(pre_place_pose)
 
     planner.close()
     return res
@@ -192,7 +192,7 @@ def solveShelf(env, seed=None, debug=False, vis=False):
     # Approach 指向下方 (-Z)
     place_approaching = np.array([0, 0, -1])
     # Closing 可以是水平面任意方向，这里选 X 轴
-    place_closing = np.array([1, 0, 0])
+    place_closing = np.array([0, -1, 0])
     
     # 构建放置姿态 (TCP 在目标位置夹着物体)
     goal_pose = env.agent.build_grasp_pose(place_approaching, place_closing, goal_p)
@@ -208,10 +208,10 @@ def solveShelf(env, seed=None, debug=False, vis=False):
     res = planner.move_to_pose_with_screw(goal_pose)
     
     # Step G: 张开夹爪
-    planner.open_gripper()
+    res = planner.open_gripper()
     
     # Step H: 垂直抬起 (离场)
-    planner.move_to_pose_with_screw(pre_place_pose)
+    res = planner.move_to_pose_with_screw(pre_place_pose)
 
     planner.close()
     return res
@@ -234,6 +234,10 @@ def solveBarrier(env, seed=None, debug=False, vis=False):
     FINGER_LENGTH = 0.025
     obb = get_actor_obb(env.cube)
     
+    # 定义安全巡航高度 (Safe Z)
+    # 设定 0.3m 为安全高度
+    safe_z = 0.3
+    
     # -------------------------------------------------------------------------- #
     # 1. 计算抓取姿态
     # -------------------------------------------------------------------------- #
@@ -255,7 +259,7 @@ def solveBarrier(env, seed=None, debug=False, vis=False):
     # -------------------------------------------------------------------------- #
 
     # Pre-grasp: 位于物体上方 15cm
-    reach_pose = grasp_pose * sapien.Pose([0, 0, -0.15])
+    reach_pose = grasp_pose * sapien.Pose([0, 0, -safe_z])
     
     # Step A: 移动到预备点
     planner.move_to_pose_with_screw(reach_pose)
@@ -267,10 +271,6 @@ def solveBarrier(env, seed=None, debug=False, vis=False):
     # -------------------------------------------------------------------------- #
     # 3. 翻越障碍 (High Lift & Traverse) [核心修改]
     # -------------------------------------------------------------------------- #
-    
-    # 定义安全巡航高度 (Safe Z)
-    # 障碍物最高约 0.35m，设定 0.5m 为安全高度
-    safe_z = 0.3
     
     # Step C: 垂直抬升至安全高度 (High Lift)
     # 保持抓取时的 XY 位置，只提升 Z
@@ -291,10 +291,10 @@ def solveBarrier(env, seed=None, debug=False, vis=False):
     res = planner.move_to_pose_with_screw(goal_pose)
     
     # Step F: 张开夹爪 (放置)
-    planner.open_gripper()
+    res = planner.open_gripper()
 
     # Step G: 抬起离场
-    planner.move_to_pose_with_screw(pre_place_pose)
+    res = planner.move_to_pose_with_screw(pre_place_pose)
 
     planner.close()
     return res

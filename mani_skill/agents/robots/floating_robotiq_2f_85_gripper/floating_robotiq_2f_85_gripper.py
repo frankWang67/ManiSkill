@@ -1,5 +1,6 @@
 from typing import Union
 
+import torch
 import numpy as np
 import sapien
 from transforms3d.euler import euler2quat
@@ -11,7 +12,8 @@ from mani_skill.agents.controllers.base_controller import ControllerConfig
 from mani_skill.agents.registration import register_agent
 from mani_skill.sensors.camera import CameraConfig
 from mani_skill.utils import sapien_utils
-
+from mani_skill.utils import common
+from mani_skill.utils.structs.actor import Actor
 
 @register_agent(asset_download_ids=["robotiq_2f"])
 class FloatingRobotiq2F85Gripper(BaseAgent):
@@ -32,6 +34,10 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
         ),
     )
     keyframes = dict(
+        rest=Keyframe(
+            qpos=[0.5, 0.0, 0.5, np.pi, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            pose=sapien.Pose(p=np.array([0.0, 0.0, 0.5]), q=euler2quat(np.pi, 0, 0)),
+        ),
         open_facing_down=Keyframe(
             qpos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             pose=sapien.Pose(p=np.array([0.0, 0.0, 0.5]), q=euler2quat(np.pi, 0, 0)),
@@ -55,6 +61,7 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
         "root_y_rot_joint",
         "root_z_rot_joint",
     ]
+    ee_link_name = "eef"
 
     @property
     def _controller_configs(
@@ -162,3 +169,88 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
         left_drive.set_limit_x(0, 0)
         left_drive.set_limit_y(0, 0)
         left_drive.set_limit_z(0, 0)
+
+    def _after_init(self):
+        self.finger1_link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "left_inner_finger_pad"
+        )
+        self.finger2_link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "right_inner_finger_pad"
+        )
+        self.tcp = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), self.ee_link_name
+        )
+
+    def is_grasping(self, object: Actor, min_force=0.5, max_angle=85):
+        """Check if the robot is grasping an object
+
+        Args:
+            object (Actor): The object to check if the robot is grasping
+            min_force (float, optional): Minimum force before the robot is considered to be grasping the object in Newtons. Defaults to 0.5.
+            max_angle (int, optional): Maximum angle of contact to consider grasping. Defaults to 85.
+        """
+        l_contact_forces = self.scene.get_pairwise_contact_forces(
+            self.finger1_link, object
+        )
+        r_contact_forces = self.scene.get_pairwise_contact_forces(
+            self.finger2_link, object
+        )
+        lforce = torch.linalg.norm(l_contact_forces, axis=1)
+        rforce = torch.linalg.norm(r_contact_forces, axis=1)
+
+        # direction to open the gripper
+        ldirection = self.finger1_link.pose.to_transformation_matrix()[..., :3, 1]
+        rdirection = -self.finger2_link.pose.to_transformation_matrix()[..., :3, 1]
+        langle = common.compute_angle_between(ldirection, l_contact_forces)
+        rangle = common.compute_angle_between(rdirection, r_contact_forces)
+        lflag = torch.logical_and(
+            lforce >= min_force, torch.rad2deg(langle) <= max_angle
+        )
+        rflag = torch.logical_and(
+            rforce >= min_force, torch.rad2deg(rangle) <= max_angle
+        )
+        return torch.logical_and(lflag, rflag)
+
+    def is_static(self, threshold: float = 0.2):
+        qvel = self.robot.get_qvel()[..., :-2]
+        return torch.max(torch.abs(qvel), 1)[0] <= threshold
+
+    @property
+    def tcp_pos(self):
+        return self.tcp.pose.p
+
+    @property
+    def tcp_pose(self):
+        return self.tcp.pose
+
+    @staticmethod
+    def build_grasp_pose(approaching, closing, center):
+        """Build a grasp pose (panda_hand_tcp)."""
+        assert np.abs(1 - np.linalg.norm(approaching)) < 1e-3
+        assert np.abs(1 - np.linalg.norm(closing)) < 1e-3
+        assert np.abs(approaching @ closing) <= 1e-3
+        ortho = np.cross(closing, approaching)
+        T = np.eye(4)
+        T[:3, :3] = np.stack([ortho, closing, approaching], axis=1)
+        T[:3, 3] = center
+        return sapien.Pose(T)
+
+@register_agent()
+class FloatingRobotiq2F85GripperWristCamera(FloatingRobotiq2F85Gripper):
+    uid = "floating_robotiq_2f_85_gripper_wristcam"
+    urdf_path = f"{PACKAGE_ASSET_DIR}/robots/robotiq_2f/floating_robotiq_2f_85_wristcam.urdf"
+
+    @property
+    def _sensor_configs(self):
+        return [
+            CameraConfig(
+                uid="hand_camera",
+                pose=sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0]),
+                width=256,
+                height=256,
+                fov=np.pi * 155 / 180,
+                near=0.01,
+                far=100,
+                mount=self.robot.links_map["camera_link"],
+            )
+        ]

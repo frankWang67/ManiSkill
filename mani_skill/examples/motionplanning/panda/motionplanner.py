@@ -7,9 +7,14 @@ from mani_skill.examples.motionplanning.two_finger_gripper.motionplanner import 
 
 
 class PandaArmMotionPlanningSolver(TwoFingerGripperMotionPlanningSolver):
-    OPEN = 1
-    CLOSED = -1
-    MOVE_GROUP = "panda_hand_tcp"
+    # # For panda gripper
+    # OPEN = 1
+    # CLOSED = -1
+    # MOVE_GROUP = "panda_hand_tcp"
+
+    # For robotiq gripper
+    OPEN = -1
+    CLOSED = 1
 
     def __init__(
         self,
