@@ -87,6 +87,18 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
             force_limit=100,
             use_delta=True,
         )
+        base_pd_ee_delta_pose = PDEEPoseControllerConfig(
+            joint_names=self.root_joint_names,
+            pos_lower=-0.1,
+            pos_upper=0.1,
+            rot_lower=-0.1,
+            rot_upper=0.1,
+            stiffness=1e3,
+            damping=1e2,
+            force_limit=100,
+            ee_link=self.ee_link_name,
+            urdf_path=self.urdf_path,
+        )
 
         # define a passive controller config to simply "turn off" other joints from being controlled and set their properties (damping/friction) to 0.
         # these joints are controlled passively by the mimic controller later on.
@@ -127,14 +139,19 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
         )
         return dict(
             pd_joint_pos=dict(
-                base=base_pd_joint_pos,
-                finger=finger_mimic_pd_joint_pos,
-                passive_finger_joints=passive_finger_joints,
+                arm=base_pd_joint_pos,
+                gripper_active=finger_mimic_pd_joint_pos,
+                gripper_passive=passive_finger_joints,
             ),
             pd_joint_delta_pos=dict(
-                base=base_pd_joint_delta_pos,
-                finger=finger_mimic_pd_joint_delta_pos,
-                passive_finger_joints=passive_finger_joints,
+                arm=base_pd_joint_delta_pos,
+                gripper_active=finger_mimic_pd_joint_delta_pos,
+                gripper_passive=passive_finger_joints,
+            ),
+            pd_ee_delta_pose=dict(
+                arm=base_pd_ee_delta_pose,
+                gripper_active=finger_mimic_pd_joint_pos,
+                gripper_passive=passive_finger_joints,
             ),
         )
 

@@ -100,21 +100,21 @@ class XArm7RobotiqWristCamera(BaseAgent):
         # Arm
         # -------------------------------------------------------------------------- #
         arm_pd_joint_pos = PDJointPosControllerConfig(
-            self.arm_joint_names,
-            None,
-            None,
-            self.arm_stiffness,
-            self.arm_damping,
-            self.arm_force_limit,
+            joint_names=self.arm_joint_names,
+            lower=None,
+            upper=None,
+            stiffness=self.arm_stiffness,
+            damping=self.arm_damping,
+            force_limit=self.arm_force_limit,
             normalize_action=False,
         )
         arm_pd_joint_delta_pos = PDJointPosControllerConfig(
-            self.arm_joint_names,
-            -0.1,
-            0.1,
-            self.arm_stiffness,
-            self.arm_damping,
-            self.arm_force_limit,
+            joint_names=self.arm_joint_names,
+            lower=-0.1,
+            upper=0.1,
+            stiffness=self.arm_stiffness,
+            damping=self.arm_damping,
+            force_limit=self.arm_force_limit,
             use_delta=True,
         )
         arm_pd_joint_target_delta_pos = deepcopy(arm_pd_joint_delta_pos)
@@ -122,13 +122,14 @@ class XArm7RobotiqWristCamera(BaseAgent):
 
         # PD ee position
         arm_pd_ee_delta_pose = PDEEPoseControllerConfig(
-            self.arm_joint_names,
-            -0.1,
-            0.1,
-            0.1,
-            self.arm_stiffness,
-            self.arm_damping,
-            self.arm_force_limit,
+            joint_names=self.arm_joint_names,
+            pos_lower=-0.1,
+            pos_upper=0.1,
+            rot_lower=-0.1,
+            rot_upper=0.1,
+            stiffness=self.arm_stiffness,
+            damping=self.arm_damping,
+            force_limit=self.arm_force_limit,
             ee_link=self.ee_link_name,
             urdf_path=self.urdf_path,
         )
@@ -162,7 +163,7 @@ class XArm7RobotiqWristCamera(BaseAgent):
             left_outer_knuckle_joint=dict(joint="right_outer_knuckle_joint", multiplier=1.0, offset=0.0),
         )
         finger_mimic_pd_joint_pos = PDJointPosMimicControllerConfig(
-            finger_joint_names,
+            joint_names=finger_joint_names,
             lower=None,
             upper=None,
             stiffness=self.gripper_stiffness,
