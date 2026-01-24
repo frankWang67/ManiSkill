@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 @dataclass
-class FlowMatchingPolicyArgs:
+class DiffusionPolicyArgs:
     exp_name: Optional[str] = None
     """the name of this experiment"""
     seed: int = 1
@@ -73,6 +73,8 @@ class FlowMatchingPolicyArgs:
     """the number of workers to use for loading the training data in the torch dataloader"""
     control_mode: str = "pd_joint_delta_pos"
     """the control mode to use for the evaluation environments. Must match the control mode of the demonstration dataset."""
+    num_diffusion_iters: int = 100
+    """the number of diffusion iterations used in training and evaluation. Should generally not be changed."""
 
     # additional tags/configs for logging purposes to wandb and shared comparisons with other algorithms
     demo_type: Optional[str] = None

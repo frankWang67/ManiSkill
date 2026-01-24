@@ -4,430 +4,32 @@ import os
 import random
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
 from functools import partial
-from typing import List, Optional
 
 import gymnasium as gym
-from gymnasium.vector.vector_env import VectorEnv
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
 import tyro
 from diffusers.optimization import get_scheduler
-from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.training_utils import EMAModel
-from gymnasium import spaces
 from mani_skill.utils.wrappers.flatten import FlattenRGBDObservationWrapper
 from torch.utils.data.dataloader import DataLoader
-from torch.utils.data.dataset import Dataset
 from torch.utils.data.sampler import BatchSampler, RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 
-from diffusion_policy.conditional_unet1d import ConditionalUnet1D
 from diffusion_policy.evaluate import evaluate
 from diffusion_policy.make_env import make_eval_envs
-from diffusion_policy.plain_conv import PlainConv
 from diffusion_policy.utils import (IterationBasedBatchSampler,
                                     build_state_obs_extractor, convert_obs,
                                     worker_init_fn)
-
-
-@dataclass
-class Args:
-    exp_name: Optional[str] = None
-    """the name of this experiment"""
-    seed: int = 1
-    """seed of the experiment"""
-    torch_deterministic: bool = True
-    """if toggled, `torch.backends.cudnn.deterministic=False`"""
-    cuda: bool = True
-    """if toggled, cuda will be enabled by default"""
-    track: bool = False
-    """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "ManiSkill"
-    """the wandb's project name"""
-    wandb_entity: Optional[str] = None
-    """the entity (team) of wandb's project"""
-    capture_video: bool = True
-    """whether to capture videos of the agent performances (check out `videos` folder)"""
-
-    env_id: str = "PegInsertionSide-v1"
-    """the id of the environment"""
-    demo_path: str = (
-        "demos/PegInsertionSide-v1/trajectory.state.pd_ee_delta_pose.physx_cpu.h5"
-    )
-    """the path of demo dataset, it is expected to be a ManiSkill dataset h5py format file"""
-    num_demos: Optional[int] = None
-    """number of trajectories to load from the demo dataset"""
-    total_iters: int = 1_000_000
-    """total timesteps of the experiment"""
-    batch_size: int = 256
-    """the batch size of sample from the replay memory"""
-
-    # Diffusion Policy specific arguments
-    lr: float = 1e-4
-    """the learning rate of the diffusion policy"""
-    obs_horizon: int = 2  # Seems not very important in ManiSkill, 1, 2, 4 work well
-    act_horizon: int = 8  # Seems not very important in ManiSkill, 4, 8, 15 work well
-    pred_horizon: int = (
-        16  # 16->8 leads to worse performance, maybe it is like generate a half image; 16->32, improvement is very marginal
-    )
-    diffusion_step_embed_dim: int = 64  # not very important
-    unet_dims: List[int] = field(
-        default_factory=lambda: [64, 128, 256]
-    )  # default setting is about ~4.5M params
-    n_groups: int = (
-        8  # jigu says it is better to let each group have at least 8 channels; it seems 4 and 8 are simila
-    )
-
-    # Environment/experiment specific arguments
-    obs_mode: str = "rgb+depth"
-    """The observation mode to use for the environment, which dictates what visual inputs to pass to the model. Can be "rgb", "depth", or "rgb+depth"."""
-    max_episode_steps: Optional[int] = None
-    """Change the environments' max_episode_steps to this value. Sometimes necessary if the demonstrations being imitated are too short. Typically the default
-    max episode steps of environments in ManiSkill are tuned lower so reinforcement learning agents can learn faster."""
-    log_freq: int = 1000
-    """the frequency of logging the training metrics"""
-    eval_freq: int = 5000
-    """the frequency of evaluating the agent on the evaluation environments"""
-    save_freq: Optional[int] = None
-    """the frequency of saving the model checkpoints. By default this is None and will only save checkpoints based on the best evaluation metrics."""
-    num_eval_episodes: int = 100
-    """the number of episodes to evaluate the agent on"""
-    num_eval_envs: int = 10
-    """the number of parallel environments to evaluate the agent on"""
-    sim_backend: str = "physx_cpu"
-    """the simulation backend to use for evaluation environments. can be "cpu" or "gpu"""
-    num_dataload_workers: int = 0
-    """the number of workers to use for loading the training data in the torch dataloader"""
-    control_mode: str = "pd_joint_delta_pos"
-    """the control mode to use for the evaluation environments. Must match the control mode of the demonstration dataset."""
-
-    # additional tags/configs for logging purposes to wandb and shared comparisons with other algorithms
-    demo_type: Optional[str] = None
-
-
-def reorder_keys(d, ref_dict):
-    out = dict()
-    for k, v in ref_dict.items():
-        if isinstance(v, dict) or isinstance(v, spaces.Dict):
-            out[k] = reorder_keys(d[k], ref_dict[k])
-        else:
-            out[k] = d[k]
-    return out
-
-
-class SmallDemoDataset_DiffusionPolicy(Dataset):  # Load everything into memory
-    def __init__(self, data_path, obs_process_fn, obs_space, include_rgb, include_depth, device, num_traj):
-        self.include_rgb = include_rgb
-        self.include_depth = include_depth
-        from diffusion_policy.utils import load_demo_dataset
-        trajectories = load_demo_dataset(data_path, num_traj=num_traj, concat=False)
-        # trajectories['observations'] is a list of dict, each dict is a traj, with keys in obs_space, values with length L+1
-        # trajectories['actions'] is a list of np.ndarray (L, act_dim)
-        print("Raw trajectory loaded, beginning observation pre-processing...")
-
-        # Pre-process the observations, make them align with the obs returned by the obs_wrapper
-        state_stack = torch.empty((0, 7), dtype=torch.float32).to(device=device)
-        obs_traj_dict_list = []
-        for obs_traj_dict in trajectories["observations"]:
-            _obs_traj_dict = reorder_keys(
-                obs_traj_dict, obs_space
-            )  # key order in demo is different from key order in env obs
-            _obs_traj_dict = obs_process_fn(_obs_traj_dict)
-            if self.include_depth:
-                _obs_traj_dict["depth"] = torch.Tensor(
-                    _obs_traj_dict["depth"].astype(np.float32)
-                ).to(device=device, dtype=torch.float16)
-            if self.include_rgb:
-                _obs_traj_dict["rgb"] = torch.from_numpy(_obs_traj_dict["rgb"]).to(
-                    device
-                )  # still uint8
-            _obs_traj_dict["state"] = torch.from_numpy(_obs_traj_dict["state"]).to(
-                device
-            )
-            state_stack = torch.cat((state_stack, _obs_traj_dict["state"]), dim=0)
-            obs_traj_dict_list.append(_obs_traj_dict)
-
-        self.state_mean = state_stack.mean(dim=0, keepdim=True)
-        self.state_std = state_stack.std(dim=0, keepdim=True)
-        self.state_std = torch.clip(self.state_std, 1e-2, np.inf)  # clipping
-
-        trajectories["observations"] = obs_traj_dict_list
-
-        self.obs_keys = list(_obs_traj_dict.keys())
-
-        # Pre-process the actions
-        action_stack = torch.empty((0, trajectories["actions"][0].shape[-1]), dtype=torch.float32).to(device=device)
-        for i in range(len(trajectories["actions"])):
-            trajectories["actions"][i] = torch.Tensor(trajectories["actions"][i]).to(
-                device=device
-            )
-            action_stack = torch.cat((action_stack, trajectories["actions"][i]), dim=0)
-        self.action_mean = action_stack.mean(dim=0, keepdim=True)
-        self.action_std = action_stack.std(dim=0, keepdim=True)
-        self.action_std = torch.clip(self.action_std, 1e-2, np.inf)  # clipping
-        print(
-            "Obs/action pre-processing is done, start to pre-compute the slice indices..."
-        )
-
-        # Pre-compute all possible (traj_idx, start, end) tuples, this is very specific to Diffusion Policy
-        if (
-            "delta_pos" in args.control_mode
-            or args.control_mode == "base_pd_joint_vel_arm_pd_joint_vel"
-        ):
-            print("Detected a delta controller type, padding with a zero action to ensure the arm stays still after solving tasks.")
-            self.pad_action_arm = torch.zeros(
-                (trajectories["actions"][0].shape[1] - 1,), device=device
-            )
-            self.delta_control = True
-            # to make the arm stay still, we pad the action with 0 in 'delta_pos' control mode
-            # gripper action needs to be copied from the last action
-        else:
-            # NOTE for absolute joint pos control probably should pad with the final joint position action.
-            # raise NotImplementedError(f"Control Mode {args.control_mode} not supported")
-            self.delta_control = False
-        self.obs_horizon, self.pred_horizon = obs_horizon, pred_horizon = (
-            args.obs_horizon,
-            args.pred_horizon,
-        )
-        self.slices = []
-        num_traj = len(trajectories["actions"])
-        total_transitions = 0
-        for traj_idx in range(num_traj):
-            L = trajectories["actions"][traj_idx].shape[0]
-            assert trajectories["observations"][traj_idx]["state"].shape[0] == L + 1
-            total_transitions += L
-
-            # |o|o|                             observations: 2
-            # | |a|a|a|a|a|a|a|a|               actions executed: 8
-            # |p|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p| actions predicted: 16
-            pad_before = obs_horizon - 1
-            # Pad before the trajectory, so the first action of an episode is in "actions executed"
-            # obs_horizon - 1 is the number of "not used actions"
-            pad_after = pred_horizon - obs_horizon
-            # Pad after the trajectory, so all the observations are utilized in training
-            # Note that in the original code, pad_after = act_horizon - 1, but I think this is not the best choice
-            self.slices += [
-                (traj_idx, start, start + pred_horizon)
-                for start in range(-pad_before, L - pred_horizon + pad_after)
-            ]  # slice indices follow convention [start, end)
-
-        print(
-            f"Total transitions: {total_transitions}, Total obs sequences: {len(self.slices)}"
-        )
-
-        self.trajectories = trajectories
-
-    def __getitem__(self, index):
-        traj_idx, start, end = self.slices[index]
-        L, act_dim = self.trajectories["actions"][traj_idx].shape
-
-        obs_traj = self.trajectories["observations"][traj_idx]
-        obs_seq = {}
-        for k, v in obs_traj.items():
-            obs_seq[k] = v[
-                max(0, start) : start + self.obs_horizon
-            ]  # start+self.obs_horizon is at least 1
-            if start < 0:  # pad before the trajectory
-                pad_obs_seq = torch.stack([obs_seq[k][0]] * abs(start), dim=0)
-                obs_seq[k] = torch.cat((pad_obs_seq, obs_seq[k]), dim=0)
-            # don't need to pad obs after the trajectory, see the above char drawing
-
-        act_seq = self.trajectories["actions"][traj_idx][max(0, start) : end]
-        if start < 0:  # pad before the trajectory
-            act_seq = torch.cat([act_seq[0].repeat(-start, 1), act_seq], dim=0)
-        if end > L:  # pad after the trajectory
-            gripper_action = act_seq[-1, -1]  # assume gripper is with pos controller
-            if self.delta_control:
-                pad_action = torch.cat((self.pad_action_arm, gripper_action[None]), dim=0)
-            else:
-                pad_action = act_seq[-1]
-            act_seq = torch.cat([act_seq, pad_action.repeat(end - L, 1)], dim=0)
-            # making the robot (arm and gripper) stay still
-        assert (
-            obs_seq["state"].shape[0] == self.obs_horizon
-            and act_seq.shape[0] == self.pred_horizon
-        )
-        return {
-            "observations": obs_seq,
-            "actions": act_seq,
-        }
-
-    def __len__(self):
-        return len(self.slices)
-
-
-class Agent(nn.Module):
-    def __init__(self, env: VectorEnv, args: Args, state_mean, state_std, action_mean, action_std):
-        super().__init__()
-        self.obs_horizon = args.obs_horizon
-        self.act_horizon = args.act_horizon
-        self.pred_horizon = args.pred_horizon
-        self.state_mean = state_mean
-        self.state_std = state_std
-        self.action_mean = action_mean
-        self.action_std = action_std
-        assert (
-            len(env.single_observation_space["state"].shape) == 2
-        )  # (obs_horizon, obs_dim)
-        assert len(env.single_action_space.shape) == 1  # (act_dim, )
-        # assert (env.single_action_space.high == 1).all() and (
-        #     env.single_action_space.low == -1
-        # ).all()
-        # denoising results will be clipped to [-1,1], so the action should be in [-1,1] as well
-        self.act_dim = env.single_action_space.shape[0]
-        obs_state_dim = env.single_observation_space["state"].shape[1]
-        total_visual_channels = 0
-        self.include_rgb = "rgb" in env.single_observation_space.keys()
-        self.include_depth = "depth" in env.single_observation_space.keys()
-
-        if self.include_rgb:
-            total_visual_channels += env.single_observation_space["rgb"].shape[-1]
-        if self.include_depth:
-            total_visual_channels += env.single_observation_space["depth"].shape[-1]
-
-        visual_feature_dim = 256
-        self.visual_encoder = PlainConv(
-            in_channels=total_visual_channels, out_dim=visual_feature_dim, pool_feature_map=True
-        )
-        self.noise_pred_net = ConditionalUnet1D(
-            input_dim=self.act_dim,  # act_horizon is not used (U-Net doesn't care)
-            global_cond_dim=self.obs_horizon * (visual_feature_dim + obs_state_dim),
-            diffusion_step_embed_dim=args.diffusion_step_embed_dim,
-            down_dims=args.unet_dims,
-            n_groups=args.n_groups,
-        )
-        self.num_diffusion_iters = 100
-        self.noise_scheduler = DDPMScheduler(
-            num_train_timesteps=self.num_diffusion_iters,
-            beta_schedule="squaredcos_cap_v2",  # has big impact on performance, try not to change
-            # clip_sample=True,  # clip output to [-1,1] to improve stability
-            clip_sample=False,
-            prediction_type="epsilon",  # predict noise (instead of denoised action)
-        )
-
-    def encode_obs(self, obs_seq, eval_mode):
-        if self.include_rgb:
-            rgb = obs_seq["rgb"].float() / 255.0  # (B, obs_horizon, 3*k, H, W)
-            img_seq = rgb
-        if self.include_depth:
-            depth = obs_seq["depth"].float() / 1024.0  # (B, obs_horizon, 1*k, H, W)
-            img_seq = depth
-        if self.include_rgb and self.include_depth:
-            img_seq = torch.cat([rgb, depth], dim=2)  # (B, obs_horizon, C, H, W), C=4*k
-        batch_size = img_seq.shape[0]
-        img_seq = img_seq.flatten(end_dim=1)  # (B*obs_horizon, C, H, W)
-        if hasattr(self, "aug") and not eval_mode:
-            img_seq = self.aug(img_seq)  # (B*obs_horizon, C, H, W)
-        visual_feature = self.visual_encoder(img_seq)  # (B*obs_horizon, D)
-        visual_feature = visual_feature.reshape(
-            batch_size, self.obs_horizon, visual_feature.shape[1]
-        )  # (B, obs_horizon, D)
-        state = (obs_seq["state"] - self.state_mean) / self.state_std
-        feature = torch.cat(
-            (visual_feature, state), dim=-1
-        )  # (B, obs_horizon, D+obs_state_dim)
-        return feature.flatten(start_dim=1)  # (B, obs_horizon * (D+obs_state_dim))
-
-    def compute_loss(self, obs_seq, action_seq):
-        B = obs_seq["state"].shape[0]
-
-        # observation as FiLM conditioning
-        obs_cond = self.encode_obs(
-            obs_seq, eval_mode=False
-        )  # (B, obs_horizon * obs_dim)
-
-        # sample noise to add to actions
-        noise = torch.randn((B, self.pred_horizon, self.act_dim), device=device)
-
-        # sample a diffusion iteration for each data point
-        timesteps = torch.randint(
-            0, self.noise_scheduler.config.num_train_timesteps, (B,), device=device
-        ).long()
-
-        # add noise to the clean images(actions) according to the noise magnitude at each diffusion iteration
-        # (this is the forward diffusion process)
-        action_seq_norm = (action_seq - self.action_mean) / self.action_std
-        noisy_action_seq = self.noise_scheduler.add_noise(action_seq_norm, noise, timesteps)
-
-        # predict the noise residual
-        noise_pred = self.noise_pred_net(
-            noisy_action_seq, timesteps, global_cond=obs_cond
-        )
-
-        return F.mse_loss(noise_pred, noise)
-
-    def get_action(self, obs_seq):
-        # init scheduler
-        # self.noise_scheduler.set_timesteps(self.num_diffusion_iters)
-        # set_timesteps will change noise_scheduler.timesteps is only used in noise_scheduler.step()
-        # noise_scheduler.step() is only called during inference
-        # if we use DDPM, and inference_diffusion_steps == train_diffusion_steps, then we can skip this
-
-        # obs_seq['state']: (B, obs_horizon, obs_state_dim)
-        B = obs_seq["state"].shape[0]
-        with torch.no_grad():
-            if self.include_rgb:
-                obs_seq["rgb"] = obs_seq["rgb"].permute(0, 1, 4, 2, 3)
-            if self.include_depth:
-                obs_seq["depth"] = obs_seq["depth"].permute(0, 1, 4, 2, 3)
-
-            obs_cond = self.encode_obs(
-                obs_seq, eval_mode=True
-            )  # (B, obs_horizon * obs_dim)
-
-            # initialize action from Guassian noise
-            noisy_action_seq = torch.randn(
-                (B, self.pred_horizon, self.act_dim), device=obs_seq["state"].device
-            )
-
-            for k in self.noise_scheduler.timesteps:
-                # predict noise
-                noise_pred = self.noise_pred_net(
-                    sample=noisy_action_seq,
-                    timestep=k,
-                    global_cond=obs_cond,
-                )
-
-                # inverse diffusion step (remove noise)
-                noisy_action_seq = self.noise_scheduler.step(
-                    model_output=noise_pred,
-                    timestep=k,
-                    sample=noisy_action_seq,
-                ).prev_sample
-
-        # denormalize
-        noisy_action_seq = noisy_action_seq * self.action_std + self.action_mean
-
-        # only take act_horizon number of actions
-        start = self.obs_horizon - 1
-        end = start + self.act_horizon
-        return noisy_action_seq[:, start:end]  # (B, act_horizon, act_dim)
-
-
-def save_ckpt(run_name, tag):
-    os.makedirs(f"runs/{run_name}/checkpoints", exist_ok=True)
-    ema.copy_to(ema_agent.parameters())
-    torch.save(
-        {
-            "agent": agent.state_dict(),
-            "ema_agent": ema_agent.state_dict(),
-            "state_mean": dataset.state_mean,
-            "state_std": dataset.state_std,
-            "action_mean": dataset.action_mean,
-            "action_std": dataset.action_std,
-        },
-        f"runs/{run_name}/checkpoints/{tag}.pt",
-    )
-
+from diffusion_policy.args import DiffusionPolicyArgs
+from diffusion_policy.dataset import SmallDemoDataset_DiffusionPolicy
+from diffusion_policy.model import Agent, save_ckpt
 
 if __name__ == "__main__":
-    args = tyro.cli(Args)
+    args = tyro.cli(DiffusionPolicyArgs)
 
     if args.exp_name is None:
         args.exp_name = os.path.basename(__file__)[: -len(".py")]
@@ -441,6 +43,11 @@ if __name__ == "__main__":
         json_file = args.demo_path[:-2] + "json"
         with open(json_file, "r") as f:
             demo_info = json.load(f)
+            assert "env_id" in demo_info["env_info"], "env_id not found in json"
+            env_id = demo_info["env_info"]["env_id"]
+            assert (
+                env_id == args.env_id
+            ), f"Env ID mismatched. Dataset has env ID {env_id}, but args has env ID {args.env_id}"
             if "control_mode" in demo_info["env_info"]["env_kwargs"]:
                 control_mode = demo_info["env_info"]["env_kwargs"]["control_mode"]
             elif "control_mode" in demo_info["episodes"][0]:
@@ -450,6 +57,11 @@ if __name__ == "__main__":
             assert (
                 control_mode == args.control_mode
             ), f"Control mode mismatched. Dataset has control mode {control_mode}, but args has control mode {args.control_mode}"
+            robot_uids = None
+            if args.robot_uids is not None:
+                robot_uids = args.robot_uids
+            elif "robot_uids" in demo_info["env_info"]["env_kwargs"]:
+                robot_uids = demo_info["env_info"]["env_kwargs"]["robot_uids"]
     assert args.obs_horizon + args.act_horizon - 1 <= args.pred_horizon
     assert args.obs_horizon >= 1 and args.act_horizon >= 1 and args.pred_horizon >= 1
 
@@ -470,6 +82,8 @@ if __name__ == "__main__":
     )
     assert args.max_episode_steps != None, "max_episode_steps must be specified as imitation learning algorithms task solve speed is dependent on the data you train on"
     env_kwargs["max_episode_steps"] = args.max_episode_steps
+    if robot_uids is not None:
+        env_kwargs["robot_uids"] = robot_uids
     other_kwargs = dict(obs_horizon=args.obs_horizon)
     envs = make_eval_envs(
         args.env_id,
@@ -527,7 +141,8 @@ if __name__ == "__main__":
         include_rgb=include_rgb,
         include_depth=include_depth,
         device=device,
-        num_traj=args.num_demos
+        num_traj=args.num_demos,
+        args=args,
     )
     sampler = RandomSampler(dataset, replacement=False)
     batch_sampler = BatchSampler(sampler, batch_size=args.batch_size, drop_last=True)
@@ -540,7 +155,7 @@ if __name__ == "__main__":
         persistent_workers=(args.num_dataload_workers > 0),
     )
 
-    agent = Agent(envs, args, dataset.state_mean, dataset.state_std, dataset.action_mean, dataset.action_std).to(device)
+    agent = Agent(envs, args, dataset.state_mean, dataset.state_std, dataset.action_mean, dataset.action_std, device).to(device)
 
     optimizer = optim.AdamW(
         params=agent.parameters(), lr=args.lr, betas=(0.95, 0.999), weight_decay=1e-6
@@ -558,7 +173,7 @@ if __name__ == "__main__":
     # accelerates training and improves stability
     # holds a copy of the model weights
     ema = EMAModel(parameters=agent.parameters(), power=0.75)
-    ema_agent = Agent(envs, args, dataset.state_mean, dataset.state_std, dataset.action_mean, dataset.action_std).to(device)
+    ema_agent = Agent(envs, args, dataset.state_mean, dataset.state_std, dataset.action_mean, dataset.action_std, device).to(device)
 
     best_eval_metrics = defaultdict(float)
     timings = defaultdict(float)
@@ -583,7 +198,7 @@ if __name__ == "__main__":
             for k in save_on_best_metrics:
                 if k in eval_metrics and eval_metrics[k] > best_eval_metrics[k]:
                     best_eval_metrics[k] = eval_metrics[k]
-                    save_ckpt(run_name, f"best_eval_{k}")
+                    save_ckpt(ema, ema_agent, agent, dataset, run_name, f"best_eval_{k}")
                     print(
                         f"New best {k}_rate: {eval_metrics[k]:.4f}. Saving checkpoint."
                     )
@@ -632,7 +247,7 @@ if __name__ == "__main__":
 
         # Checkpoint
         if args.save_freq is not None and iteration % args.save_freq == 0:
-            save_ckpt(run_name, str(iteration))
+            save_ckpt(ema, ema_agent, agent, dataset, run_name, str(iteration))
         pbar.update(1)
         pbar.set_postfix({"loss": total_loss.item()})
         last_tick = time.time()

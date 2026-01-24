@@ -16,6 +16,7 @@ parser.add_argument("--output-filename", "-f", type=str, default="merged_multi_r
 parser.add_argument("--sim-backend-gen", type=str, default="physx_cpu", help="Simulation backend for trajectory generation")
 parser.add_argument("--sim-backend-replay", type=str, default="physx_cpu", help="Simulation backend for trajectory replay")
 parser.add_argument("--save-video", action="store_true", help="Whether to save video during trajectory generation")
+parser.add_argument("--num-procs", type=int, default=1, help="Number of parallel processes for motion planning and trajectory replay")
 args = parser.parse_args()
 
 # ================= 配置区域 =================
@@ -82,6 +83,7 @@ def main():
             f"--traj-name=\"{traj_name}\" "
             f"-n {args.traj_num} "
             f"--sim-backend {args.sim_backend_gen} "
+            f"--num-procs {args.num_procs} "
             f"--only-count-success "
         )
         if args.save_video:
@@ -103,8 +105,11 @@ def main():
             f"--use-first-env-state "
             f"-c {args.control_mode} "
             f"-o {args.obs_mode} "
-            f"--save-traj" # 确保保存回放后的轨迹
+            f"--num-envs {args.num_procs} "
+            f"--save-traj " # 确保保存回放后的轨迹
         )
+        if args.save_video:
+            cmd_replay += "--save-video "
         
         run_command(cmd_replay)
         

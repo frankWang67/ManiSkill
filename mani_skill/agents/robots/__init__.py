@@ -22,9 +22,9 @@ from .unitree_g1 import *
 from .unitree_go import *
 from .unitree_h1 import *
 from .ur_e import UR10e
-from .ur import UR5, UR5PandahandRealsense
+from .ur import *
 from .widowx import *
 from .widowxai import *
-from .xarm import XArm7Ability
+from .xarm import *
 from .xarm6 import *
 from .xlerobot import *

@@ -43,6 +43,11 @@ def train():
         json_file = args.demo_path[:-2] + "json"
         with open(json_file, "r") as f:
             demo_info = json.load(f)
+            assert "env_id" in demo_info["env_info"], "env_id not found in json"
+            env_id = demo_info["env_info"]["env_id"]
+            assert (
+                env_id == args.env_id
+            ), f"Env ID mismatched. Dataset has env ID {env_id}, but args has env ID {args.env_id}"
             if "control_mode" in demo_info["env_info"]["env_kwargs"]:
                 control_mode = demo_info["env_info"]["env_kwargs"]["control_mode"]
             elif "control_mode" in demo_info["episodes"][0]:
@@ -52,6 +57,11 @@ def train():
             assert (
                 control_mode == args.control_mode
             ), f"Control mode mismatched. Dataset has control mode {control_mode}, but args has control mode {args.control_mode}"
+            robot_uids = None
+            if args.robot_uids is not None:
+                robot_uids = args.robot_uids
+            elif "robot_uids" in demo_info["env_info"]["env_kwargs"]:
+                robot_uids = demo_info["env_info"]["env_kwargs"]["robot_uids"]
     assert args.obs_horizon + args.act_horizon - 1 <= args.pred_horizon
     assert args.obs_horizon >= 1 and args.act_horizon >= 1 and args.pred_horizon >= 1
 
@@ -72,6 +82,8 @@ def train():
     )
     assert args.max_episode_steps != None, "max_episode_steps must be specified as imitation learning algorithms task solve speed is dependent on the data you train on"
     env_kwargs["max_episode_steps"] = args.max_episode_steps
+    if robot_uids is not None:
+        env_kwargs["robot_uids"] = robot_uids
     other_kwargs = dict(obs_horizon=args.obs_horizon)
     envs = make_eval_envs(
         args.env_id,

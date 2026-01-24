@@ -82,8 +82,10 @@ class PandaRobotiqWristCamera(BaseAgent):
             CameraConfig(
                 uid="hand_camera",
                 pose=sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0]),
-                width=256,
-                height=256,
+                # width=256,
+                # height=256,
+                width=224,
+                height=224,
                 # fov=np.pi * 155 / 180,
                 fov=np.pi * 120 / 180,
                 near=0.01,

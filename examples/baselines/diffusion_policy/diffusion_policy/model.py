@@ -4,20 +4,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from gymnasium.vector.vector_env import VectorEnv
+from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from torchvision.transforms import ColorJitter
 
 from diffusion_policy.conditional_unet1d import ConditionalUnet1D
 from diffusion_policy.plain_conv import PlainConv
 from diffusion_policy.timm_obs_encoder import TimmObsEncoder, SHAPE_META
-
-from flow_matching_policy.args import FlowMatchingPolicyArgs
+from diffusion_policy.args import DiffusionPolicyArgs
 
 class Agent(nn.Module):
-    def __init__(self, env: VectorEnv, args: FlowMatchingPolicyArgs, action_std, device):
+    def __init__(self, env: VectorEnv, args: DiffusionPolicyArgs, state_mean, state_std, action_mean, action_std, device):
         super().__init__()
         self.obs_horizon = args.obs_horizon
         self.act_horizon = args.act_horizon
         self.pred_horizon = args.pred_horizon
+        self.state_mean = state_mean
+        self.state_std = state_std
+        self.action_mean = action_mean
         self.action_std = action_std
         self.device = device
         assert (
@@ -28,8 +31,10 @@ class Agent(nn.Module):
         #     env.single_action_space.low == -1
         # ).all()
         # denoising results will be clipped to [-1,1], so the action should be in [-1,1] as well
+
         self.act_dim = env.single_action_space.shape[0]
-        self.obs_state_dim = env.single_observation_space["state"].shape[1]
+        obs_state_dim = env.single_observation_space["state"].shape[1]
+
         total_visual_channels = 0
         self.include_rgb = "rgb" in env.single_observation_space.keys()
         self.include_depth = "depth" in env.single_observation_space.keys()
@@ -39,9 +44,9 @@ class Agent(nn.Module):
         if self.include_depth:
             total_visual_channels += env.single_observation_space["depth"].shape[-1]
 
-        # self.visual_feature_dim = 256
+        # visual_feature_dim = 256
         # self.visual_encoder = PlainConv(
-        #     in_channels=total_visual_channels, out_dim=self.visual_feature_dim, pool_feature_map=True
+        #     in_channels=total_visual_channels, out_dim=visual_feature_dim, pool_feature_map=True
         # )
         shape_meta = SHAPE_META
         shape_meta["obs"]["rgb"]["horizon"] = args.obs_horizon if self.include_rgb else 0
@@ -63,13 +68,21 @@ class Agent(nn.Module):
             share_rgb_model=False,
             imagenet_norm=True,
         )
-        self.visual_feature_dim = np.prod(self.visual_encoder.output_shape())
-        self.vel_pred_net = ConditionalUnet1D(
+        visual_feature_dim = np.prod(self.visual_encoder.output_shape())
+        self.noise_pred_net = ConditionalUnet1D(
             input_dim=self.act_dim,  # act_horizon is not used (U-Net doesn't care)
-            global_cond_dim=self.obs_horizon * (self.visual_feature_dim + self.obs_state_dim),
+            global_cond_dim=self.obs_horizon * (visual_feature_dim + obs_state_dim),
             diffusion_step_embed_dim=args.diffusion_step_embed_dim,
             down_dims=args.unet_dims,
             n_groups=args.n_groups,
+        )
+        self.num_diffusion_iters = args.num_diffusion_iters
+        self.noise_scheduler = DDPMScheduler(
+            num_train_timesteps=self.num_diffusion_iters,
+            beta_schedule="squaredcos_cap_v2",  # has big impact on performance, try not to change
+            # clip_sample=True,  # clip output to [-1,1] to improve stability
+            clip_sample=False,
+            prediction_type="epsilon",  # predict noise (instead of denoised action)
         )
 
     def encode_obs(self, obs_seq, eval_mode):
@@ -89,7 +102,7 @@ class Agent(nn.Module):
         visual_feature = visual_feature.reshape(
             batch_size, self.obs_horizon, visual_feature.shape[1]
         )  # (B, obs_horizon, D)
-        state = obs_seq["state"]
+        state = (obs_seq["state"] - self.state_mean) / self.state_std
         feature = torch.cat(
             (visual_feature, state), dim=-1
         )  # (B, obs_horizon, D+obs_state_dim)
@@ -104,25 +117,26 @@ class Agent(nn.Module):
         )  # (B, obs_horizon * obs_dim)
 
         # sample noise to add to actions
-        noise = torch.randn((B, self.pred_horizon, self.act_dim), device=self.device) * self.action_std
+        noise = torch.randn((B, self.pred_horizon, self.act_dim), device=self.device)
 
         # sample a diffusion iteration for each data point
-        timesteps = torch.rand(B, device=self.device) * 0.999 + 0.001
-        timesteps_expanded = timesteps[:, None, None]  # (B, 1, 1)
+        timesteps = torch.randint(
+            0, self.noise_scheduler.config.num_train_timesteps, (B,), device=self.device
+        ).long()
 
         # add noise to the clean images(actions) according to the noise magnitude at each diffusion iteration
         # (this is the forward diffusion process)
-        x_t = timesteps_expanded * noise + (1 - timesteps_expanded) * action_seq  # (B, pred_horizon, act_dim)
-        u_t = noise - action_seq  # (B, pred_horizon, act_dim)
+        action_seq_norm = (action_seq - self.action_mean) / self.action_std
+        noisy_action_seq = self.noise_scheduler.add_noise(action_seq_norm, noise, timesteps)
 
-        # predict the velocity field
-        v_t = self.vel_pred_net(
-            x_t, timesteps, global_cond=obs_cond
+        # predict the noise residual
+        noise_pred = self.noise_pred_net(
+            noisy_action_seq, timesteps, global_cond=obs_cond
         )
 
-        return F.mse_loss(v_t, u_t)
+        return F.mse_loss(noise_pred, noise)
 
-    def get_action(self, obs_seq, steps=6):
+    def get_action(self, obs_seq):
         # init scheduler
         # self.noise_scheduler.set_timesteps(self.num_diffusion_iters)
         # set_timesteps will change noise_scheduler.timesteps is only used in noise_scheduler.step()
@@ -143,21 +157,26 @@ class Agent(nn.Module):
 
             # initialize action from Guassian noise
             noisy_action_seq = torch.randn(
-                (B, self.pred_horizon, self.act_dim), device=self.device
-            ) * self.action_std
+                (B, self.pred_horizon, self.act_dim), device=obs_seq["state"].device
+            )
 
-            timesteps = torch.linspace(1.0, 0.0, steps + 1, device=self.device)  # (steps+1, )
-            dt = -1.0 / steps
-            for t in timesteps:
+            for k in self.noise_scheduler.timesteps:
                 # predict noise
-                vel_pred = self.vel_pred_net(
+                noise_pred = self.noise_pred_net(
                     sample=noisy_action_seq,
-                    timestep=t,
+                    timestep=k,
                     global_cond=obs_cond,
                 )
-                # print(f"{torch.norm((vel_pred * dt)[:, :, :-1], dim=-1)=}")
 
-                noisy_action_seq = noisy_action_seq + vel_pred * dt  # Euler integration
+                # inverse diffusion step (remove noise)
+                noisy_action_seq = self.noise_scheduler.step(
+                    model_output=noise_pred,
+                    timestep=k,
+                    sample=noisy_action_seq,
+                ).prev_sample
+
+        # denormalize
+        noisy_action_seq = noisy_action_seq * self.action_std + self.action_mean
 
         # only take act_horizon number of actions
         start = self.obs_horizon - 1
@@ -172,6 +191,9 @@ def save_ckpt(ema, ema_agent, agent, dataset, run_name, tag):
         {
             "agent": agent.state_dict(),
             "ema_agent": ema_agent.state_dict(),
+            "state_mean": dataset.state_mean,
+            "state_std": dataset.state_std,
+            "action_mean": dataset.action_mean,
             "action_std": dataset.action_std,
         },
         f"runs/{run_name}/checkpoints/{tag}.pt",

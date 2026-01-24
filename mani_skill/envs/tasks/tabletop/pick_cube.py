@@ -5,7 +5,11 @@ import sapien
 import torch
 
 import mani_skill.envs.utils.randomization as randomization
-from mani_skill.agents.robots import SO100, Fetch, Panda, WidowXAI, XArm6Robotiq
+from mani_skill.agents.robots import (
+    SO100, Fetch, Panda, WidowXAI, XArm6Robotiq, 
+    PandaRobotiqWristCamera, XArm6RobotiqWristCamera, 
+    XArm7RobotiqWristCamera, UR5RobotiqWristCamera, FloatingRobotiq2F85GripperWristCamera
+)
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.envs.tasks.tabletop.pick_cube_cfgs import PICK_CUBE_CONFIGS
 from mani_skill.sensors.camera import CameraConfig
@@ -40,9 +44,15 @@ class PickCubeEnv(BaseEnv):
         "xarm6_robotiq",
         "so100",
         "widowxai",
+        "panda_robotiq_wristcam",
+        "xarm6_robotiq_wristcam",
+        "xarm7_robotiq_wristcam",
+        "ur5_robotiq_wristcam",
+        "floating_robotiq_2f_85_gripper_wristcam",
     ]
-    agent: Union[Panda, Fetch, XArm6Robotiq, SO100, WidowXAI]
-    goal_thresh = 0.025
+    agent: Union[Panda, Fetch, XArm6Robotiq, SO100, WidowXAI, PandaRobotiqWristCamera, XArm6RobotiqWristCamera, XArm7RobotiqWristCamera, UR5RobotiqWristCamera, FloatingRobotiq2F85GripperWristCamera]
+    # goal_thresh = 0.025
+    goal_thresh = 0.1
     cube_spawn_half_size = 0.05
     cube_spawn_center = (0, 0)
 
