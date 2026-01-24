@@ -38,11 +38,11 @@ class XArm7RobotiqWristCamera(BaseAgent):
             qpos=np.array(
                 [
                     0.0,
-                    -0.4,
+                    -0.6,
                     0.0,
-                    0.8,
+                    1.0,
                     0.0,
-                    1.2,
+                    1.6,
                     0.0,
 
                     0.0,
@@ -87,7 +87,8 @@ class XArm7RobotiqWristCamera(BaseAgent):
                 pose=sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0]),
                 width=256,
                 height=256,
-                fov=np.pi * 155 / 180,
+                # fov=np.pi * 155 / 180,
+                fov=np.pi * 120 / 180,
                 near=0.01,
                 far=100,
                 mount=self.robot.links_map["camera_link"],

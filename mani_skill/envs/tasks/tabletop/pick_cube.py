@@ -103,7 +103,7 @@ class PickCubeEnv(BaseEnv):
             add_collision=False,
             initial_pose=sapien.Pose(),
         )
-        self._hidden_objects.append(self.goal_site)
+        # self._hidden_objects.append(self.goal_site)
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):

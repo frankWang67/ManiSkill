@@ -36,7 +36,7 @@ class UR5RobotiqWristCamera(UR5):
         rest=Keyframe(
             pose=sapien.Pose(),
             # qpos=np.array([-2.9392,  4.3871, -1.6020,  5.0165, -4.6887,  3.3661, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
-            qpos=np.array([0.0, -1.67, 1.6020,  -1.5708, -1.5708, -1.5708, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            qpos=np.array([-0.3, -1.67, 1.2708,  -1.1708, -1.5708, -1.5708-0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
         )
     )
 
@@ -67,7 +67,8 @@ class UR5RobotiqWristCamera(UR5):
                 pose=sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0]),
                 width=256,
                 height=256,
-                fov=np.pi * 155 / 180,
+                # fov=np.pi * 155 / 180,
+                fov=np.pi * 120 / 180,
                 near=0.01,
                 far=100,
                 mount=self.robot.links_map["camera_link"],
