@@ -49,6 +49,14 @@ class PickFromDeepBoxEnv(PickCubeEnv):
         super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=robot_init_qpos_noise, **kwargs)
         self.goal_thresh = self.goal_radius
 
+    @property
+    def _default_human_render_camera_configs(self):
+        self.human_cam_eye_pos[2] += 0.2
+        pose = sapien_utils.look_at(
+            eye=self.human_cam_eye_pos, target=self.human_cam_target_pos
+        )
+        return CameraConfig("render_camera", pose, 512, 512, 1, 0.01, 100)
+
     def _load_scene(self, options: dict):
         self.table_scene = TableSceneBuilder(
             self, robot_init_qpos_noise=self.robot_init_qpos_noise
@@ -319,6 +327,15 @@ class PickBehindBarrierEnv(PickCubeEnv):
         super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=robot_init_qpos_noise, **kwargs)
         self.goal_thresh = self.goal_radius
 
+    @property
+    def _default_human_render_camera_configs(self):
+        self.human_cam_eye_pos[0] -= 0.5
+        self.human_cam_eye_pos[1] += 0.2
+        pose = sapien_utils.look_at(
+            eye=self.human_cam_eye_pos, target=self.human_cam_target_pos
+        )
+        return CameraConfig("render_camera", pose, 512, 512, 1, 0.01, 100)
+
     def _load_scene(self, options: dict):
         self.table_scene = TableSceneBuilder(
             self, robot_init_qpos_noise=self.robot_init_qpos_noise
@@ -359,7 +376,7 @@ class PickBehindBarrierEnv(PickCubeEnv):
             # --- 1. Randomize Barrier ---
             # FIX: Move barrier to [0.0, 0.1] range (Center to slightly Front)
             # Previous was [-0.25, -0.15] which is too close to robot base (~-0.6)
-            barrier_x = torch.rand(b) * 0.05 - 0.05
+            barrier_x = torch.rand(b) * 0.05 - 0.1
             
             target_height = torch.rand((b, 1)) * 0.1 + 0.15
             barrier_z = target_height - self.barrier_half_height

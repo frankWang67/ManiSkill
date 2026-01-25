@@ -102,7 +102,7 @@ class Agent(nn.Module):
         visual_feature = visual_feature.reshape(
             batch_size, self.obs_horizon, visual_feature.shape[1]
         )  # (B, obs_horizon, D)
-        state = (obs_seq["state"] - self.state_mean) / self.state_std
+        state = (obs_seq["state"].to(self.device) - self.state_mean) / self.state_std
         feature = torch.cat(
             (visual_feature, state), dim=-1
         )  # (B, obs_horizon, D+obs_state_dim)
@@ -157,7 +157,7 @@ class Agent(nn.Module):
 
             # initialize action from Guassian noise
             noisy_action_seq = torch.randn(
-                (B, self.pred_horizon, self.act_dim), device=obs_seq["state"].device
+                (B, self.pred_horizon, self.act_dim), device=self.device
             )
 
             for k in self.noise_scheduler.timesteps:
