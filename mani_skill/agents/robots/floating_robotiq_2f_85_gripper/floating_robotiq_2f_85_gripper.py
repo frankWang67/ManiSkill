@@ -116,6 +116,9 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
 
         finger_joint_names = ["left_outer_knuckle_joint", "right_outer_knuckle_joint"]
         # use a mimic controller config to define one action to control both fingers
+        mimic_config = dict(
+            left_outer_knuckle_joint=dict(joint="right_outer_knuckle_joint", multiplier=1.0, offset=0.0),
+        )
         finger_mimic_pd_joint_pos = PDJointPosMimicControllerConfig(
             joint_names=finger_joint_names,
             lower=None,
@@ -125,6 +128,7 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
             force_limit=0.1,
             friction=0.05,
             normalize_action=False,
+            mimic=mimic_config,
         )
         finger_mimic_pd_joint_delta_pos = PDJointPosMimicControllerConfig(
             joint_names=finger_joint_names,
@@ -136,6 +140,7 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
             normalize_action=True,
             friction=0.05,
             use_delta=True,
+            mimic=mimic_config,
         )
         return dict(
             pd_joint_pos=dict(

@@ -51,7 +51,7 @@ class PickFromDeepBoxEnv(PickCubeEnv):
 
     @property
     def _default_human_render_camera_configs(self):
-        self.human_cam_eye_pos[2] += 0.2
+        self.human_cam_eye_pos[2] = 0.8
         pose = sapien_utils.look_at(
             eye=self.human_cam_eye_pos, target=self.human_cam_target_pos
         )
