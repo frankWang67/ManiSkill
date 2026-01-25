@@ -4,6 +4,7 @@ import numpy as np
 import sapien
 import sapien.render
 import torch
+from transforms3d.euler import euler2quat
 
 from mani_skill.envs.tasks.tabletop.pick_cube import PickCubeEnv
 from mani_skill.utils.registration import register_env
@@ -11,7 +12,11 @@ from mani_skill.utils.structs.pose import Pose
 from mani_skill.envs.utils import randomization
 from mani_skill.utils.geometry import rotation_conversions
 from mani_skill.utils import sapien_utils
+from mani_skill.utils.building import actors
+from mani_skill.utils.scene_builder.table import TableSceneBuilder
 from mani_skill.sensors.camera import CameraConfig
+
+GOAL_RADIUS = 0.10
 
 # --- Helper Functions ---
 
@@ -38,9 +43,24 @@ class PickFromDeepBoxEnv(PickCubeEnv):
     Implementation: Using table as bottom, surrounded by 4 walls.
     Fixed: Increased inner width to avoid screw plan failures.
     """
+    goal_radius = GOAL_RADIUS
+    
+    def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
+        super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=robot_init_qpos_noise, **kwargs)
+        self.goal_thresh = self.goal_radius
 
     def _load_scene(self, options: dict):
-        super()._load_scene(options)
+        self.table_scene = TableSceneBuilder(
+            self, robot_init_qpos_noise=self.robot_init_qpos_noise
+        )
+        self.table_scene.build()
+        self.cube = actors.build_cube(
+            self.scene,
+            half_size=self.cube_half_size,
+            color=[1, 0, 0, 1],
+            name="cube",
+            initial_pose=sapien.Pose(p=[0, 0, self.cube_half_size]),
+        )
         
         # Reduced wall height slightly to make planning easier
         self.wall_height = 0.15
@@ -61,6 +81,16 @@ class PickFromDeepBoxEnv(PickCubeEnv):
             builder.initial_pose = sapien.Pose(p=[0, 0, -10])
             part = builder.build_kinematic(name=name)
             self.box_walls.append(part)
+
+        self.goal_site = actors.build_red_white_target(
+            self.scene,
+            radius=self.goal_radius,
+            thickness=1e-5,
+            name="goal_site",
+            add_collision=False,
+            body_type="kinematic",
+            initial_pose=sapien.Pose(p=[0, 0, 1e-3]),
+        )
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):
@@ -118,8 +148,14 @@ class PickFromDeepBoxEnv(PickCubeEnv):
             goal_xyz = torch.zeros((b, 3))
             goal_xyz[:, 0] = box_center_xy[:, 0] - 0.1
             goal_xyz[:, 1] = box_center_xy[:, 1] + 0.3
-            goal_xyz[:, 2] = self.cube_half_size
-            self.goal_site.set_pose(Pose.create_from_pq(goal_xyz))
+            goal_xyz[:, 2] = 1e-3
+            # self.goal_site.set_pose(Pose.create_from_pq(goal_xyz))
+            self.goal_site.set_pose(
+                Pose.create_from_pq(
+                    p=goal_xyz,
+                    q=euler2quat(0, np.pi / 2, 0),
+                )
+            )
 
 
 # =============================================================================
@@ -133,6 +169,12 @@ class PickFromShelfEnv(PickCubeEnv):
     Target object on a shelf.
     Fixed: Increased shelf gap and reduced depth to facilitate motion planning.
     """
+    goal_radius = GOAL_RADIUS
+    
+    def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
+        super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=robot_init_qpos_noise, **kwargs)
+        self.goal_thresh = self.goal_radius
+
     @property
     def _default_human_render_camera_configs(self):
         # registers a more high-definition (512x512) camera used just for rendering when render_mode="rgb_array" or calling env.render_rgb_array()
@@ -142,7 +184,17 @@ class PickFromShelfEnv(PickCubeEnv):
         )
 
     def _load_scene(self, options: dict):
-        super()._load_scene(options)
+        self.table_scene = TableSceneBuilder(
+            self, robot_init_qpos_noise=self.robot_init_qpos_noise
+        )
+        self.table_scene.build()
+        self.cube = actors.build_cube(
+            self.scene,
+            half_size=self.cube_half_size,
+            color=[1, 0, 0, 1],
+            name="cube",
+            initial_pose=sapien.Pose(p=[0, 0, self.cube_half_size]),
+        )
         
         self.shelf_parts = []
         part_names = ["shelf_bottom", "shelf_top", "shelf_back"]
@@ -167,6 +219,16 @@ class PickFromShelfEnv(PickCubeEnv):
             builder.add_box_visual(half_size=hs, material=shelf_mat)
             builder.initial_pose = sapien.Pose(p=[0, 0, -10])
             self.shelf_parts.append(builder.build_kinematic(name=name))
+
+        self.goal_site = actors.build_red_white_target(
+            self.scene,
+            radius=self.goal_radius,
+            thickness=1e-5,
+            name="goal_site",
+            add_collision=False,
+            body_type="kinematic",
+            initial_pose=sapien.Pose(p=[0, 0, 1e-3]),
+        )
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):
@@ -228,12 +290,17 @@ class PickFromShelfEnv(PickCubeEnv):
             self.cube.set_pose(Pose.create_from_pq(cube_global, shelf_q))
 
             # --- 4. Goal ---
-            goal_pos = torch.zeros((b, 3))
-            goal_pos[:, 0] = -0.1
-            goal_pos[:, 1] = 0.0
-            goal_pos[:, 2] = self.cube_half_size
-            self.goal_site.set_pose(Pose.create_from_pq(goal_pos))
-
+            goal_xyz = torch.zeros((b, 3))
+            goal_xyz[:, 0] = -0.1
+            goal_xyz[:, 1] = 0.0
+            goal_xyz[:, 2] = 1e-3
+            # self.goal_site.set_pose(Pose.create_from_pq(goal_xyz))
+            self.goal_site.set_pose(
+                Pose.create_from_pq(
+                    p=goal_xyz,
+                    q=euler2quat(0, np.pi / 2, 0),
+                )
+            )
 
 # =============================================================================
 # Task 3: PickBehindBarrier (Barrier Picking)
@@ -246,8 +313,24 @@ class PickBehindBarrierEnv(PickCubeEnv):
     Obstacle between robot and object.
     Fixed: Moved barrier to positive X to prevent initial overlap with robot.
     """
+    goal_radius = GOAL_RADIUS
+    
+    def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
+        super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=robot_init_qpos_noise, **kwargs)
+        self.goal_thresh = self.goal_radius
+
     def _load_scene(self, options: dict):
-        super()._load_scene(options)
+        self.table_scene = TableSceneBuilder(
+            self, robot_init_qpos_noise=self.robot_init_qpos_noise
+        )
+        self.table_scene.build()
+        self.cube = actors.build_cube(
+            self.scene,
+            half_size=self.cube_half_size,
+            color=[1, 0, 0, 1],
+            name="cube",
+            initial_pose=sapien.Pose(p=[0, 0, self.cube_half_size]),
+        )
         
         self.barrier_half_height = 0.15
         barrier_mat = create_colored_material([0.3, 0.3, 0.3, 1])
@@ -257,6 +340,16 @@ class PickBehindBarrierEnv(PickCubeEnv):
         builder.add_box_visual(half_size=[0.025, 0.3, self.barrier_half_height], material=barrier_mat)
         builder.initial_pose = sapien.Pose(p=[0, 0, -10])
         self.barrier = builder.build_kinematic(name="barrier")
+
+        self.goal_site = actors.build_red_white_target(
+            self.scene,
+            radius=self.goal_radius,
+            thickness=1e-5,
+            name="goal_site",
+            add_collision=False,
+            body_type="kinematic",
+            initial_pose=sapien.Pose(p=[0, 0, 1e-3]),
+        )
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):
@@ -294,5 +387,11 @@ class PickBehindBarrierEnv(PickCubeEnv):
             # goal_xyz[:, 0] = -0.2 
             goal_xyz[:, 0] = barrier_pos[:, 0] - 0.15
             goal_xyz[:, 1] = 0
-            goal_xyz[:, 2] = self.cube_half_size
-            self.goal_site.set_pose(Pose.create_from_pq(goal_xyz))
+            goal_xyz[:, 2] = 1e-3
+            # self.goal_site.set_pose(Pose.create_from_pq(goal_xyz))
+            self.goal_site.set_pose(
+                Pose.create_from_pq(
+                    p=goal_xyz,
+                    q=euler2quat(0, np.pi / 2, 0),
+                )
+            )

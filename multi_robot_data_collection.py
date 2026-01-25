@@ -9,10 +9,10 @@ SCRIPT_PATH = "mani_skill/examples/motionplanning/panda/run.py"
 
 parser = ArgumentParser(description="Multi-Robot Data Collection via Motion Planning and Replay")
 parser.add_argument("--env", "-e", type=str, help="Environment ID")
+parser.add_argument("--output-filename", "-f", type=str, help="Final merged output filename")
 parser.add_argument("--traj-num", "-n", type=int, default=20, help="Number of trajectories to collect per robot")
 parser.add_argument("--obs-mode", "-o", type=str, default="rgb", help="Observation mode for replay")
 parser.add_argument("--control-mode", "-c", type=str, default="pd_ee_delta_pose", help="Control mode for replay")
-parser.add_argument("--output-filename", "-f", type=str, default="merged_multi_robot_data.h5", help="Final merged output filename")
 parser.add_argument("--sim-backend-gen", type=str, default="physx_cpu", help="Simulation backend for trajectory generation")
 parser.add_argument("--sim-backend-replay", type=str, default="physx_cpu", help="Simulation backend for trajectory replay")
 parser.add_argument("--save-video", action="store_true", help="Whether to save video during trajectory generation")

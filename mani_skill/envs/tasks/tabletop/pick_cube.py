@@ -51,8 +51,7 @@ class PickCubeEnv(BaseEnv):
         "floating_robotiq_2f_85_gripper_wristcam",
     ]
     agent: Union[Panda, Fetch, XArm6Robotiq, SO100, WidowXAI, PandaRobotiqWristCamera, XArm6RobotiqWristCamera, XArm7RobotiqWristCamera, UR5RobotiqWristCamera, FloatingRobotiq2F85GripperWristCamera]
-    # goal_thresh = 0.025
-    goal_thresh = 0.1
+    goal_thresh = 0.025
     cube_spawn_half_size = 0.05
     cube_spawn_center = (0, 0)
 
