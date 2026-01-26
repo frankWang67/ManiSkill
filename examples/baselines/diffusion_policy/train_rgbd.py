@@ -77,7 +77,7 @@ if __name__ == "__main__":
         control_mode=args.control_mode,
         reward_mode="sparse",
         obs_mode=args.obs_mode,
-        render_mode="rgb_array",
+        render_mode="all",
         human_render_camera_configs=dict(shader_pack="default")
     )
     assert args.max_episode_steps != None, "max_episode_steps must be specified as imitation learning algorithms task solve speed is dependent on the data you train on"
@@ -202,6 +202,26 @@ if __name__ == "__main__":
                     print(
                         f"New best {k}_rate: {eval_metrics[k]:.4f}. Saving checkpoint."
                     )
+
+    def evaluate_and_save(iteration):
+        if iteration % args.eval_freq == 0:
+            last_tick = time.time()
+            ema.copy_to(ema_agent.parameters())
+            eval_metrics = evaluate(
+                args.num_eval_episodes, ema_agent, envs, device, args.sim_backend
+            )
+            timings["eval"] += time.time() - last_tick
+
+            print(f"Evaluated {len(eval_metrics['success_at_end'])} episodes")
+            for k in eval_metrics.keys():
+                eval_metrics[k] = np.mean(eval_metrics[k])
+                writer.add_scalar(f"eval/{k}", eval_metrics[k], iteration)
+                print(f"{k}: {eval_metrics[k]:.4f}")
+
+            ckpt_filename = f"ckpt_iteration_{iteration}"
+            save_ckpt(ema, ema_agent, agent, dataset, run_name, ckpt_filename)
+            print(f"Saved checkpoint at iteration {iteration}.")
+
     def log_metrics(iteration):
         if iteration % args.log_freq == 0:
             writer.add_scalar(
@@ -242,7 +262,8 @@ if __name__ == "__main__":
         timings["ema"] += time.time() - last_tick
 
         # Evaluation
-        evaluate_and_save_best(iteration)
+        # evaluate_and_save_best(iteration)
+        evaluate_and_save(iteration)
         log_metrics(iteration)
 
         # Checkpoint
@@ -252,7 +273,8 @@ if __name__ == "__main__":
         pbar.set_postfix({"loss": total_loss.item()})
         last_tick = time.time()
 
-    evaluate_and_save_best(args.total_iters)
+    # evaluate_and_save_best(args.total_iters)
+    evaluate_and_save(args.total_iters)
     log_metrics(args.total_iters)
 
     envs.close()

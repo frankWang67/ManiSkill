@@ -69,6 +69,7 @@ class Agent(nn.Module):
             imagenet_norm=True,
         )
         visual_feature_dim = np.prod(self.visual_encoder.output_shape())
+        
         self.noise_pred_net = ConditionalUnet1D(
             input_dim=self.act_dim,  # act_horizon is not used (U-Net doesn't care)
             global_cond_dim=self.obs_horizon * (visual_feature_dim + obs_state_dim),
