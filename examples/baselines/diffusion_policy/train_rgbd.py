@@ -1,5 +1,8 @@
 ALGO_NAME = "BC_Diffusion_rgbd_UNet"
 
+import warnings
+warnings.filterwarnings("ignore", message=".*pkg_resources is deprecated.*")
+
 import os
 import random
 import time

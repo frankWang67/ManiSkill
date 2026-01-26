@@ -329,8 +329,8 @@ class PickBehindBarrierEnv(PickCubeEnv):
 
     @property
     def _default_human_render_camera_configs(self):
-        self.human_cam_eye_pos[0] -= 0.5
-        self.human_cam_eye_pos[1] += 0.2
+        self.human_cam_eye_pos[0] = 0.1
+        self.human_cam_eye_pos[1] = 0.8
         pose = sapien_utils.look_at(
             eye=self.human_cam_eye_pos, target=self.human_cam_target_pos
         )
