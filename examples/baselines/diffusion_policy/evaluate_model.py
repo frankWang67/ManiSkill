@@ -14,11 +14,15 @@ import numpy as np
 from mani_skill.utils.wrappers.flatten import FlattenRGBDObservationWrapper
 from diffusion_policy.args import DiffusionPolicyArgs
 from diffusion_policy.model import Agent
+# from diffusion_policy.guided_diffusion_model import GuidedDiffusionAgent as Agent
 from diffusion_policy.make_env import make_eval_envs
 from diffusion_policy.evaluate import evaluate
 
 @dataclass
 class Args:
+    exp_name: Optional[str] = None
+    """Experiment name for locating config and checkpoint files"""
+
     num_eval_episodes: Annotated[int, tyro.conf.arg(aliases=["-n"])] = 100
     """Number of evaluation episodes to run"""
 
@@ -27,9 +31,6 @@ class Args:
 
     num_envs: Annotated[int, tyro.conf.arg(aliases=["-ne"])] = 10
     """Number of parallel environments to use during evaluation"""
-
-    exp_name: Optional[str] = None
-    """Experiment name for locating config and checkpoint files"""
 
     robot_uids: Annotated[str, tyro.conf.arg(aliases=["-r"])] = "panda_wristcam"
     """Robot UID to use in the environment"""
@@ -66,7 +67,9 @@ def main(args: Args):
     # assert args.config_file is not None and args.checkpoint_path is not None
     assert args.exp_name is not None
     config_file = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "config.yaml")
-    checkpoint_path = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "best_eval_success_at_end.pt")
+    # checkpoint_path = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "best_eval_success_at_end.pt")
+    # checkpoint_path = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "ckpt_iteration_30000.pt")
+    checkpoint_path = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "ckpt_iteration_25000.pt")
 
     env_kwargs, dp_args = load_config(config_file)
 
@@ -98,6 +101,8 @@ def main(args: Args):
     video_dir = None
     if args.save_video:
         video_dir = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "eval_results", args.robot_uids, "videos")
+        # video_dir = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "eval_results", "without_guidance", args.robot_uids, "videos")
+        # video_dir = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "eval_results", "guided_diffusion", args.robot_uids, "videos")
 
     env = make_eval_envs(
         dp_args.env_id,
@@ -143,6 +148,8 @@ def main(args: Args):
     print(f"{success_at_end_rate=}")
 
     log_filename = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "eval_results", args.robot_uids, "eval_results.txt")
+    # log_filename = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "eval_results", "without_guidance", args.robot_uids, "eval_results.txt")
+    # log_filename = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "eval_results", "guided_diffusion", args.robot_uids, "eval_results.txt")
     os.makedirs(os.path.dirname(log_filename), exist_ok=True)
     with open(log_filename, "a") as f:
         f.write(f"Success Once Rate: {success_once_rate}\n")

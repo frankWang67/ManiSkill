@@ -1,21 +1,20 @@
-import gymnasium as gym
-import numpy as np
-import sapien
+import os
 import yaml
-import torch
-import torch.nn as nn
-from gymnasium.vector.vector_env import VectorEnv
-from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 import time
+import torch
+import sapien
+import numpy as np
+import gymnasium as gym
 
-from mani_skill.envs.sapien_env import BaseEnv
-from mani_skill.utils import gym_utils
+import warnings
+warnings.filterwarnings("ignore", message=".*get variables from other wrappers is deprecated.*")
+
 from mani_skill.utils.wrappers import FrameStack
 from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 from mani_skill.utils.wrappers.flatten import FlattenRGBDObservationWrapper
-from diffusion_policy.conditional_unet1d import ConditionalUnet1D
-from diffusion_policy.plain_conv import PlainConv
+import diffusion_policy
 from diffusion_policy.model import Agent
+# from diffusion_policy.guided_diffusion_model import GuidedDiffusionAgent as Agent
 from diffusion_policy.args import DiffusionPolicyArgs
 
 import tyro
@@ -24,13 +23,13 @@ from typing import Optional, Annotated
 
 @dataclass
 class Args:
-    config_file: Optional[str] = "/home/wshf/ManiSkill/examples/baselines/diffusion_policy/evals/PickFromDeepBoxv1-PandaRobotiq-timm-encoder/config.yaml"
-    """Parameter config file to load"""
+    exp_name: Optional[str] = None
+    """Experiment name for locating config and checkpoint files"""
 
-    checkpoint_path: Optional[str] = "/home/wshf/ManiSkill/examples/baselines/diffusion_policy/evals/PickFromDeepBoxv1-PandaRobotiq-timm-encoder/best_eval_success_at_end.pt"
-    """Checkpoint path to load"""
+    sim_backend: Annotated[str, tyro.conf.arg(aliases=["-b"])] = "physx_cpu"
+    """Which simulation backend to use. Can be 'physx_cpu', 'physx_gpu'"""
 
-    robot: Optional[str] = "panda_wristcam"
+    robot_uids: Annotated[str, tyro.conf.arg(aliases=["-r"])] = "panda_wristcam"
     """Robot UID to use in the environment"""
 
     pause: Annotated[bool, tyro.conf.arg(aliases=["-p"])] = False
@@ -60,8 +59,11 @@ def load_config(config_file):
     return env_kwargs, dp_args
 
 def main(args: Args):
-    assert args.config_file is not None and args.checkpoint_path is not None
-    env_kwargs, dp_args = load_config(args.config_file)
+    assert args.exp_name is not None
+    config_file = os.path.join(os.path.dirname(os.path.dirname(diffusion_policy.__file__)), "evals", args.exp_name, "config.yaml")
+    checkpoint_path = os.path.join(os.path.dirname(os.path.dirname(diffusion_policy.__file__)), "evals", args.exp_name, "best_eval_success_at_end.pt")
+    # checkpoint_path = os.path.join(os.path.dirname(os.path.dirname(diffusion_policy.__file__)), "evals", args.exp_name, "ckpt_iteration_30000.pt")
+    env_kwargs, dp_args = load_config(config_file)
 
     np.set_printoptions(suppress=True, precision=3)
     verbose = not args.quiet
@@ -77,15 +79,12 @@ def main(args: Args):
     if env_kwargs["render_mode"] == "human" and env_kwargs["num_envs"] == 1:
         parallel_in_single_scene = False
 
-    # env_kwargs["sim_backend"] = "gpu"
-    # env_kwargs["render_backend"] = "gpu"
-    # env_kwargs["enable_shadow"] = True
     env_kwargs["parallel_in_single_scene"] = parallel_in_single_scene
     env_kwargs.pop("env_id")
     env_kwargs.pop("env_horizon")
     env_kwargs.pop("robot_uids")
 
-    env = gym.make(id=dp_args.env_id, robot_uids=args.robot, **env_kwargs)
+    env = gym.make(id=dp_args.env_id, robot_uids=args.robot_uids, **env_kwargs)
     # record_dir = args.record_dir
     # if record_dir:
     #     record_dir = record_dir.format(env_id=args.env_id)
@@ -95,7 +94,7 @@ def main(args: Args):
     env = ManiSkillVectorEnv(env, ignore_terminations=True, record_metrics=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() and dp_args.cuda else "cpu")
-    checkpoint = torch.load(args.checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device)
     agent = Agent(env, dp_args, checkpoint["state_mean"], checkpoint["state_std"], checkpoint["action_mean"], checkpoint["action_std"], device).to(device)
     agent.load_state_dict(checkpoint["ema_agent"])
     agent.eval()
@@ -147,7 +146,6 @@ def main(args: Args):
 
     # if record_dir:
     #     print(f"Saving video to {record_dir}")
-
 
 if __name__ == "__main__":
     parsed_args = tyro.cli(Args)

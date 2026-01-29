@@ -69,7 +69,7 @@ class XArm7RobotiqWristCamera(BaseAgent):
         ]
         self.arm_stiffness = 1e3
         self.arm_damping = 1e2
-        self.arm_force_limit = 500
+        self.arm_force_limit = 100
 
         self.gripper_stiffness = 1e5
         self.gripper_damping = 2000
@@ -135,6 +135,18 @@ class XArm7RobotiqWristCamera(BaseAgent):
             force_limit=self.arm_force_limit,
             ee_link=self.ee_link_name,
             urdf_path=self.urdf_path,
+        )
+        arm_pd_ee_pose = PDEEPoseControllerConfig(
+            joint_names=self.arm_joint_names,
+            pos_lower=None,
+            pos_upper=None,
+            stiffness=self.arm_stiffness,
+            damping=self.arm_damping,
+            force_limit=self.arm_force_limit,
+            ee_link=self.ee_link_name,
+            urdf_path=self.urdf_path,
+            use_delta=False,
+            normalize_action=False,
         )
 
         arm_pd_ee_target_delta_pose = deepcopy(arm_pd_ee_delta_pose)
@@ -207,6 +219,11 @@ class XArm7RobotiqWristCamera(BaseAgent):
             ),
             pd_ee_target_delta_pose=dict(
                 arm=arm_pd_ee_target_delta_pose,
+                gripper_active=finger_mimic_pd_joint_pos,
+                gripper_passive=passive_finger_joints,
+            ),
+            pd_ee_pose=dict(
+                arm=arm_pd_ee_pose,
                 gripper_active=finger_mimic_pd_joint_pos,
                 gripper_passive=passive_finger_joints,
             ),

@@ -75,6 +75,7 @@ class PickFromDeepBoxEnv(PickCubeEnv):
         # Increased length to ensure coverage
         self.wall_length = 0.35
         self.wall_thickness = 0.02
+        self.obstacle_half_sizes = []
         
         self.box_walls = []
         wall_names = ["box_front", "box_back", "box_left", "box_right"]
@@ -89,6 +90,7 @@ class PickFromDeepBoxEnv(PickCubeEnv):
             builder.initial_pose = sapien.Pose(p=[0, 0, -10])
             part = builder.build_kinematic(name=name)
             self.box_walls.append(part)
+            self.obstacle_half_sizes.append(half_size)
 
         self.goal_site = actors.build_red_white_target(
             self.scene,
@@ -165,6 +167,25 @@ class PickFromDeepBoxEnv(PickCubeEnv):
                 )
             )
 
+    def get_obstacles_info(self):
+        obstacles_info = []
+        
+        # 遍历环境中的架子部件 (Bottom, Top, Back)
+        for i in range(len(self.box_walls)):
+            part = self.box_walls[i]
+            extent = self.obstacle_half_sizes[i]  # 预存的半尺寸列表
+            
+            current_pose = part.pose.raw_pose
+            
+            obs_info = {
+                # 这里的 pose.p 和 pose.q 在 ManiSkill 封装下通常支持 Batch
+                'center': current_pose[:, :3], # (B, 3)
+                'quat': current_pose[:, 3:],   # (B, 4) [w, x, y, z]
+                'extent': torch.tensor(extent, device=current_pose.device).expand(current_pose.shape[0], 3) # (B, 3) 动态读取的尺寸
+            }
+            obstacles_info.append(obs_info)
+            
+        return obstacles_info
 
 # =============================================================================
 # Task 2: PickFromShelf (Shelf Picking)
@@ -212,6 +233,7 @@ class PickFromShelfEnv(PickCubeEnv):
         # FIX: Reduced shelf depth (half_size x) from 0.2 (0.4 total) to 0.12 (0.24 total)
         self.shelf_half_depth = 0.08
         self.shelf_half_width = 0.2
+        self.obstacle_half_sizes = []
 
         for i, name in enumerate(part_names):
             builder = self.scene.create_actor_builder()
@@ -222,6 +244,7 @@ class PickFromShelfEnv(PickCubeEnv):
             else:
                 # Top/Bottom: x=depth, y=width, z=thickness
                 hs = [self.shelf_half_depth, self.shelf_half_width, 0.02]
+            self.obstacle_half_sizes.append(hs)
                 
             builder.add_box_collision(half_size=hs)
             builder.add_box_visual(half_size=hs, material=shelf_mat)
@@ -310,6 +333,26 @@ class PickFromShelfEnv(PickCubeEnv):
                 )
             )
 
+    def get_obstacles_info(self):
+        obstacles_info = []
+        
+        # 遍历环境中的架子部件 (Bottom, Top, Back)
+        for i in range(len(self.shelf_parts)):
+            part = self.shelf_parts[i]
+            extent = self.obstacle_half_sizes[i]  # 预存的半尺寸列表
+            
+            current_pose = part.pose.raw_pose
+            
+            obs_info = {
+                # 这里的 pose.p 和 pose.q 在 ManiSkill 封装下通常支持 Batch
+                'center': current_pose[:, :3], # (B, 3)
+                'quat': current_pose[:, 3:],   # (B, 4) [w, x, y, z]
+                'extent': torch.tensor(extent, device=current_pose.device).expand(current_pose.shape[0], 3) # (B, 3) 动态读取的尺寸
+            }
+            obstacles_info.append(obs_info)
+            
+        return obstacles_info
+
 # =============================================================================
 # Task 3: PickBehindBarrier (Barrier Picking)
 # =============================================================================
@@ -350,11 +393,12 @@ class PickBehindBarrierEnv(PickCubeEnv):
         )
         
         self.barrier_half_height = 0.15
+        self.barrier_half_size = [0.025, 0.3, self.barrier_half_height]
         barrier_mat = create_colored_material([0.3, 0.3, 0.3, 1])
 
         builder = self.scene.create_actor_builder()
-        builder.add_box_collision(half_size=[0.025, 0.3, self.barrier_half_height])
-        builder.add_box_visual(half_size=[0.025, 0.3, self.barrier_half_height], material=barrier_mat)
+        builder.add_box_collision(half_size=self.barrier_half_size)
+        builder.add_box_visual(half_size=self.barrier_half_size, material=barrier_mat)
         builder.initial_pose = sapien.Pose(p=[0, 0, -10])
         self.barrier = builder.build_kinematic(name="barrier")
 
@@ -412,3 +456,22 @@ class PickBehindBarrierEnv(PickCubeEnv):
                     q=euler2quat(0, np.pi / 2, 0),
                 )
             )
+
+    def get_obstacles_info(self):
+        obstacles_info = []
+        
+        # 遍历环境中的障碍物 (Barrier)
+        part = self.barrier
+        extent = self.barrier_half_size  # 预存的半尺寸列表
+        
+        current_pose = part.pose.raw_pose
+        
+        obs_info = {
+            # 这里的 pose.p 和 pose.q 在 ManiSkill 封装下通常支持 Batch
+            'center': current_pose[:, :3], # (B, 3)
+            'quat': current_pose[:, 3:],   # (B, 4) [w, x, y, z]
+            'extent': torch.tensor(extent, device=current_pose.device).expand(current_pose.shape[0], 3) # (B, 3) 动态读取的尺寸
+        }
+        obstacles_info.append(obs_info)
+            
+        return obstacles_info

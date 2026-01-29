@@ -63,6 +63,15 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
     ]
     ee_link_name = "eef"
 
+    base_stiffness = 1e3
+    base_damping = 1e2
+    base_force_limit = 100
+
+    gripper_stiffness = 1e5
+    gripper_damping = 2000
+    gripper_force_limit = 0.1
+    gripper_friction = 1
+
     @property
     def _controller_configs(
         self,
@@ -73,18 +82,18 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
             joint_names=self.root_joint_names,
             lower=None,
             upper=None,
-            stiffness=1e3,
-            damping=1e2,
-            force_limit=100,
+            stiffness=self.base_stiffness,
+            damping=self.base_damping,
+            force_limit=self.base_force_limit,
             normalize_action=False,
         )
         base_pd_joint_delta_pos = PDJointPosControllerConfig(
             joint_names=self.root_joint_names,
             lower=-0.1,
             upper=0.1,
-            stiffness=1e3,
-            damping=1e2,
-            force_limit=100,
+            stiffness=self.base_stiffness,
+            damping=self.base_damping,
+            force_limit=self.base_force_limit,
             use_delta=True,
         )
         base_pd_ee_delta_pose = PDEEPoseControllerConfig(
@@ -93,11 +102,23 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
             pos_upper=0.1,
             rot_lower=-0.1,
             rot_upper=0.1,
-            stiffness=1e3,
-            damping=1e2,
-            force_limit=100,
+            stiffness=self.base_stiffness,
+            damping=self.base_damping,
+            force_limit=self.base_force_limit,
             ee_link=self.ee_link_name,
             urdf_path=self.urdf_path,
+        )
+        base_pd_ee_pose = PDEEPoseControllerConfig(
+            joint_names=self.root_joint_names,
+            pos_lower=None,
+            pos_upper=None,
+            stiffness=self.base_stiffness,
+            damping=self.base_damping,
+            force_limit=self.base_force_limit,
+            ee_link=self.ee_link_name,
+            urdf_path=self.urdf_path,
+            use_delta=False,
+            normalize_action=False,
         )
 
         # define a passive controller config to simply "turn off" other joints from being controlled and set their properties (damping/friction) to 0.
@@ -123,10 +144,10 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
             joint_names=finger_joint_names,
             lower=None,
             upper=None,
-            stiffness=1e5,
-            damping=1e3,
-            force_limit=0.1,
-            friction=0.05,
+            stiffness=self.gripper_stiffness,
+            damping=self.gripper_damping,
+            force_limit=self.gripper_force_limit,
+            friction=self.gripper_friction,
             normalize_action=False,
             mimic=mimic_config,
         )
@@ -134,11 +155,11 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
             joint_names=finger_joint_names,
             lower=-0.1,
             upper=0.1,
-            stiffness=1e5,
-            damping=1e3,
-            force_limit=0.1,
+            stiffness=self.gripper_stiffness,
+            damping=self.gripper_damping,
+            force_limit=self.gripper_force_limit,
             normalize_action=True,
-            friction=0.05,
+            friction=self.gripper_friction,
             use_delta=True,
             mimic=mimic_config,
         )
@@ -155,6 +176,11 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
             ),
             pd_ee_delta_pose=dict(
                 arm=base_pd_ee_delta_pose,
+                gripper_active=finger_mimic_pd_joint_pos,
+                gripper_passive=passive_finger_joints,
+            ),
+            pd_ee_pose=dict(
+                arm=base_pd_ee_pose,
                 gripper_active=finger_mimic_pd_joint_pos,
                 gripper_passive=passive_finger_joints,
             ),
