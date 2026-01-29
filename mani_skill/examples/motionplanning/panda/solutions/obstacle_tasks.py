@@ -6,6 +6,9 @@ from mani_skill.examples.motionplanning.base_motionplanner.utils import (
     compute_grasp_info_by_obb, get_actor_obb
 )
 
+JOINT_VEL_LIMITS = 0.5
+JOINT_ACC_LIMITS = 0.5
+
 # -------------------------------------------------------------------------- #
 # Task 1: Deep Box (修复 Screw Plan Failed)
 # -------------------------------------------------------------------------- #
@@ -18,6 +21,8 @@ def solveDeepBox(env, seed=None, debug=False, vis=False):
         base_pose=env.unwrapped.agent.robot.pose,
         visualize_target_grasp_pose=vis,
         print_env_info=False,
+        joint_vel_limits=JOINT_VEL_LIMITS,
+        joint_acc_limits=JOINT_ACC_LIMITS,
     )
     env = env.unwrapped
     
@@ -117,6 +122,8 @@ def solveShelf(env, seed=None, debug=False, vis=False):
         base_pose=env.unwrapped.agent.robot.pose,
         visualize_target_grasp_pose=vis,
         print_env_info=False,
+        joint_vel_limits=JOINT_VEL_LIMITS,
+        joint_acc_limits=JOINT_ACC_LIMITS,
     )
     env = env.unwrapped
     
@@ -228,6 +235,8 @@ def solveBarrier(env, seed=None, debug=False, vis=False):
         base_pose=env.unwrapped.agent.robot.pose,
         visualize_target_grasp_pose=vis,
         print_env_info=False,
+        joint_vel_limits=JOINT_VEL_LIMITS,
+        joint_acc_limits=JOINT_ACC_LIMITS,
     )
     env = env.unwrapped
     

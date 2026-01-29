@@ -1,5 +1,6 @@
 import warnings
 warnings.filterwarnings("ignore", message=".*pkg_resources is deprecated.*")
+warnings.filterwarnings("ignore", message=".*CUDA reports that you have.*")
 
 import os
 import sys

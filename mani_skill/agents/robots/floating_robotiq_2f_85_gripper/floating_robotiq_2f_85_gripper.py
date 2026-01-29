@@ -4,6 +4,7 @@ import torch
 import numpy as np
 import sapien
 from transforms3d.euler import euler2quat
+from copy import deepcopy
 
 from mani_skill import ASSET_DIR, PACKAGE_ASSET_DIR
 from mani_skill.agents.base_agent import BaseAgent, DictControllerConfig, Keyframe
@@ -108,6 +109,11 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
             ee_link=self.ee_link_name,
             urdf_path=self.urdf_path,
         )
+        base_pd_joint_target_delta_pos = deepcopy(base_pd_joint_delta_pos)
+        base_pd_joint_target_delta_pos.use_target = True
+        base_pd_ee_target_delta_pose = deepcopy(base_pd_ee_delta_pose)
+        base_pd_ee_target_delta_pose.use_target = True
+        
         base_pd_ee_pose = PDEEPoseControllerConfig(
             joint_names=self.root_joint_names,
             pos_lower=None,
@@ -176,6 +182,16 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
             ),
             pd_ee_delta_pose=dict(
                 arm=base_pd_ee_delta_pose,
+                gripper_active=finger_mimic_pd_joint_pos,
+                gripper_passive=passive_finger_joints,
+            ),
+            pd_joint_target_delta_pos=dict(
+                arm=base_pd_joint_target_delta_pos,
+                gripper_active=finger_mimic_pd_joint_delta_pos,
+                gripper_passive=passive_finger_joints,
+            ),
+            pd_ee_target_delta_pose=dict(
+                arm=base_pd_ee_target_delta_pose,
                 gripper_active=finger_mimic_pd_joint_pos,
                 gripper_passive=passive_finger_joints,
             ),
