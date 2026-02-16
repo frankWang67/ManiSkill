@@ -7,6 +7,10 @@ We support translating actions from certain controllers to a limited number of c
 The script is only tested for Panda, and may include some Panda-specific hardcode.
 """
 
+import warnings
+warnings.filterwarnings("ignore", message=".*pkg_resources is deprecated.*")
+warnings.filterwarnings("ignore", message=".*CUDA reports that you have.*")
+
 import copy
 import multiprocessing as mp
 import os

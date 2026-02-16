@@ -1,3 +1,7 @@
+import warnings
+warnings.filterwarnings("ignore", message=".*pkg_resources is deprecated.*")
+warnings.filterwarnings("ignore", message=".*CUDA reports that you have.*")
+
 import multiprocessing as mp
 import os
 from copy import deepcopy

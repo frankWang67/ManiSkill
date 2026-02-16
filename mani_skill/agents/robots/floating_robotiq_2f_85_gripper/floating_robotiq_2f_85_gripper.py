@@ -36,23 +36,23 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
     )
     keyframes = dict(
         rest=Keyframe(
-            qpos=[0.5, 0.0, 0.5, np.pi, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            pose=sapien.Pose(p=np.array([0.0, 0.0, 0.5]), q=euler2quat(np.pi, 0, 0)),
+            qpos=[0.4, 0.0, 0.5, np.pi, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            pose=sapien.Pose(),
         ),
-        open_facing_down=Keyframe(
-            qpos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            pose=sapien.Pose(p=np.array([0.0, 0.0, 0.5]), q=euler2quat(np.pi, 0, 0)),
-        ),
-        open_facing_up=Keyframe(
-            qpos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            pose=sapien.Pose(p=np.array([0.0, 0.0, 0.5])),
-        ),
-        open_facing_side=Keyframe(
-            qpos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            pose=sapien.Pose(
-                p=np.array([0.0, 0.0, 0.5]), q=np.array([0.7071, 0, 0.7071, 0])
-            ),
-        ),
+        # open_facing_down=Keyframe(
+        #     qpos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        #     pose=sapien.Pose(p=np.array([0.0, 0.0, 0.5]), q=euler2quat(np.pi, 0, 0)),
+        # ),
+        # open_facing_up=Keyframe(
+        #     qpos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        #     pose=sapien.Pose(p=np.array([0.0, 0.0, 0.5])),
+        # ),
+        # open_facing_side=Keyframe(
+        #     qpos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        #     pose=sapien.Pose(
+        #         p=np.array([0.0, 0.0, 0.5]), q=np.array([0.7071, 0, 0.7071, 0])
+        #     ),
+        # ),
     )
     root_joint_names = [
         "root_x_axis_joint",

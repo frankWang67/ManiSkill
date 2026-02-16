@@ -207,7 +207,7 @@ class PDEEPoseController(PDEEPosController):
             np.hstack(
                 [
                     np.broadcast_to(self.config.pos_lower, 3),
-                    np.broadcast_to(self.config.rot_lower, 3),
+                    np.broadcast_to(self.config.rot_lower, 4), # Change from 3 to 4 to account for quaternion rotation representation
                 ]
             )
         )
@@ -215,7 +215,7 @@ class PDEEPoseController(PDEEPosController):
             np.hstack(
                 [
                     np.broadcast_to(self.config.pos_upper, 3),
-                    np.broadcast_to(self.config.rot_upper, 3),
+                    np.broadcast_to(self.config.rot_upper, 4), # Change from 3 to 4 to account for quaternion rotation representation
                 ]
             )
         )
@@ -238,8 +238,11 @@ class PDEEPoseController(PDEEPosController):
 
     def compute_target_pose(self, prev_ee_pose_at_base: Pose, action):
         if self.config.use_delta:
-            delta_pos, delta_rot = action[:, 0:3], action[:, 3:6]
-            delta_quat = matrix_to_quaternion(euler_angles_to_matrix(delta_rot, "XYZ"))
+            # ===== CHANGE FROM EULER ANGLES TO QUATERNION REPRESENTATION FOR ROTATION CONTROL =====
+            # delta_pos, delta_rot = action[:, 0:3], action[:, 3:6]
+            # delta_quat = matrix_to_quaternion(euler_angles_to_matrix(delta_rot, "XYZ"))
+            delta_pos, delta_quat = action[:, 0:3], action[:, 3:7]
+            # ======================================================================================
             delta_pose = Pose.create_from_pq(delta_pos, delta_quat)
             if "root_aligned_body_rotation" in self.config.frame:
                 q = quaternion_multiply(delta_pose.q, prev_ee_pose_at_base.q)
@@ -256,10 +259,13 @@ class PDEEPoseController(PDEEPosController):
             assert (
                 self.config.frame == "root_translation:root_aligned_body_rotation"
             ), self.config.frame
-            target_pos, target_rot = action[:, 0:3], action[:, 3:6]
-            target_quat = matrix_to_quaternion(
-                euler_angles_to_matrix(target_rot, "XYZ")
-            )
+            # ===== CHANGE FROM EULER ANGLES TO QUATERNION REPRESENTATION FOR ROTATION CONTROL =====
+            # target_pos, target_rot = action[:, 0:3], action[:, 3:6]
+            # target_quat = matrix_to_quaternion(
+            #     euler_angles_to_matrix(target_rot, "XYZ")
+            # )
+            target_pos, target_quat = action[:, 0:3], action[:, 3:7]
+            # ======================================================================================
             target_pose = Pose.create_from_pq(target_pos, target_quat)
 
         return target_pose

@@ -142,9 +142,12 @@ class PickCubeEnv(BaseEnv):
 
     def _get_obs_extra(self, info: dict):
         # in reality some people hack is_grasped into observations by checking if the gripper can close fully or not
+        tcp_pose_world_frame = self.agent.tcp_pose
+        tcp_pose_root_frame = self.agent.robot.get_pose().inv() * tcp_pose_world_frame
         obs = dict(
             is_grasped=info["is_grasped"],
-            tcp_pose=self.agent.tcp_pose.raw_pose,
+            tcp_pose=tcp_pose_root_frame.raw_pose,
+            tcp_pose_world_frame=tcp_pose_world_frame.raw_pose,
             goal_pos=self.goal_site.pose.p,
         )
         if "state" in self.obs_mode:

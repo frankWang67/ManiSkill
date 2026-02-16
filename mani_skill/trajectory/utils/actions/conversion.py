@@ -191,15 +191,20 @@ def from_pd_joint_pos_to_ee(
                         common.to_tensor(
                             target_ee_pose_pin.p[0], device=env.unwrapped.device
                         ),
+                        # ===== CHANGE FROM EULER ANGLES TO QUATERNION REPRESENTATION FOR ROTATION CONTROL =====
+                        # common.to_tensor(
+                        #     rotation_conversions.matrix_to_euler_angles(
+                        #         rotation_conversions.quaternion_to_matrix(
+                        #             target_ee_pose_pin.q[0]
+                        #         ),
+                        #         "XYZ",
+                        #     ),
+                        #     device=env.unwrapped.device,
+                        # ),
                         common.to_tensor(
-                            rotation_conversions.matrix_to_euler_angles(
-                                rotation_conversions.quaternion_to_matrix(
-                                    target_ee_pose_pin.q[0]
-                                ),
-                                "XYZ",
-                            ),
-                            device=env.unwrapped.device,
+                            target_ee_pose_pin.q[0], device=env.unwrapped.device
                         ),
+                        # ======================================================================================
                     ]
                 )
                 output_action_dict["arm"][:3] -= arm_controller.articulation.pose.p[0]

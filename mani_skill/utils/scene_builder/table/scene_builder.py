@@ -135,6 +135,8 @@ class TableSceneBuilder(SceneBuilder):
             "ur5_robotiq_wristcam",
             "ur5_pandahand_realsense",
             "panda_robotiq_wristcam",
+            "floating_robotiq_2f_85_gripper",
+            "floating_robotiq_2f_85_gripper_wristcam",
         ]:
             qpos = self.env.agent.keyframes["rest"].qpos
             # qpos = (
@@ -145,9 +147,6 @@ class TableSceneBuilder(SceneBuilder):
             # )
             self.env.agent.reset(qpos)
             self.env.agent.robot.set_pose(sapien.Pose([-0.522, 0, 0]))
-        elif self.env.robot_uids in ["floating_robotiq_2f_85_gripper", "floating_robotiq_2f_85_gripper_wristcam"]:
-            qpos = self.env.agent.keyframes["rest"].qpos
-            self.env.agent.reset(qpos)
         elif self.env.robot_uids == "fetch":
             qpos = np.array(
                 [
