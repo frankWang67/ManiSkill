@@ -369,6 +369,7 @@ class PickBehindBarrierEnv(PickCubeEnv):
     def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
         super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=robot_init_qpos_noise, **kwargs)
         self.goal_thresh = self.goal_radius
+        self.harder = kwargs.get("harder", False)
 
     @property
     def _default_human_render_camera_configs(self):
@@ -422,7 +423,10 @@ class PickBehindBarrierEnv(PickCubeEnv):
             # Previous was [-0.25, -0.15] which is too close to robot base (~-0.6)
             barrier_x = torch.rand(b) * 0.05 - 0.1
             
-            target_height = torch.rand((b, 1)) * 0.1 + 0.15
+            if self.harder:
+                target_height = torch.ones((b, 1)) * 0.28
+            else:
+                target_height = torch.rand((b, 1)) * 0.1 + 0.15
             barrier_z = target_height - self.barrier_half_height
             
             barrier_pos = torch.zeros((b, 3))
@@ -435,7 +439,10 @@ class PickBehindBarrierEnv(PickCubeEnv):
             # --- 2. Place Cube (Behind Barrier) ---
             cube_xyz = torch.zeros((b, 3))
             # Place cube 20-30cm behind the barrier
-            cube_xyz[:, 0] = barrier_pos[:, 0] + 0.15 + torch.rand(b) * 0.05
+            if self.harder:
+                cube_xyz[:, 0] = barrier_pos[:, 0] + 0.19
+            else:
+                cube_xyz[:, 0] = barrier_pos[:, 0] + 0.15 + torch.rand(b) * 0.05
             cube_xyz[:, 1] = (torch.rand(b) - 0.5) * 0.2
             cube_xyz[:, 2] = self.cube_half_size
             
@@ -445,7 +452,6 @@ class PickBehindBarrierEnv(PickCubeEnv):
             # --- 3. Goal (In front of barrier) ---
             goal_xyz = torch.zeros((b, 3))
             # Goal close to robot side
-            # goal_xyz[:, 0] = -0.2 
             goal_xyz[:, 0] = barrier_pos[:, 0] - 0.15
             goal_xyz[:, 1] = 0
             goal_xyz[:, 2] = 1e-3

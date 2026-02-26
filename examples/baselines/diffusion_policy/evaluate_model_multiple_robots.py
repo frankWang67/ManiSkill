@@ -5,9 +5,9 @@ from argparse import ArgumentParser
 
 SCRIPT_PATH = os.path.join(os.path.dirname(__file__), "evaluate_model.py")
 
-parser = ArgumentParser(description="Multi-Robot Data Collection via Motion Planning and Replay")
-parser.add_argument("--exp-name", "-e", type=str, help="Environment ID")
-parser.add_argument("--save-video", action="store_true", help="Whether to save video during trajectory generation")
+parser = ArgumentParser(description="Multi-Robot Policy Model Evaluation")
+parser.add_argument("--exp-name", "-e", type=str, help="Experiment name for locating config and checkpoint files")
+parser.add_argument("--save-video", action="store_true", help="Whether to save video during evaluation")
 args = parser.parse_args()
 
 # ================= 配置区域 =================

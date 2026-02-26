@@ -68,8 +68,8 @@ def main(args: Args):
     assert args.exp_name is not None
     config_file = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "config.yaml")
     # checkpoint_path = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "best_eval_success_at_end.pt")
-    # checkpoint_path = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "ckpt_iteration_30000.pt")
-    checkpoint_path = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "ckpt_iteration_25000.pt")
+    checkpoint_path = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "ckpt_iteration_30000.pt")
+    # checkpoint_path = os.path.join(os.path.dirname(__file__), "evals", args.exp_name, "ckpt_iteration_25000.pt")
 
     env_kwargs, dp_args = load_config(config_file)
 

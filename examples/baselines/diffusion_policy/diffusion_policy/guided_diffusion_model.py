@@ -19,12 +19,13 @@ class GuidedDiffusionAgent(Agent):
         [ 0.01, -0.043, 0.01],
         [-0.01,  0.043, 0.01],
         [-0.01, -0.043, 0.01],
+
         [ 0.04,  0.0,  -0.15],
         [-0.04,  0.0,  -0.15],
         [ 0.0 ,  0.04, -0.15],
         [ 0.0 , -0.04, -0.15],
         
-        # [0.0, 0.0, 0.0]
+        # [0.0, 0.0, 0.0],
     ])
 
     def __init__(self, env: VectorEnv, args: DiffusionPolicyArgs, state_mean, state_std, action_mean, action_std, device):
