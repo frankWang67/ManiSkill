@@ -367,9 +367,13 @@ class PickBehindBarrierEnv(PickCubeEnv):
     goal_radius = GOAL_RADIUS
     
     def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
+        if "harder" in kwargs:
+            self.harder = kwargs["harder"]
+            kwargs.pop("harder")
+        else:
+            self.harder = False
         super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=robot_init_qpos_noise, **kwargs)
         self.goal_thresh = self.goal_radius
-        self.harder = kwargs.get("harder", False)
 
     @property
     def _default_human_render_camera_configs(self):
@@ -424,7 +428,7 @@ class PickBehindBarrierEnv(PickCubeEnv):
             barrier_x = torch.rand(b) * 0.05 - 0.1
             
             if self.harder:
-                target_height = torch.ones((b, 1)) * 0.28
+                target_height = torch.ones((b, 1)) * 0.32
             else:
                 target_height = torch.rand((b, 1)) * 0.1 + 0.15
             barrier_z = target_height - self.barrier_half_height
@@ -470,7 +474,12 @@ class PickBehindBarrierEnv(PickCubeEnv):
         part = self.barrier
         extent = self.barrier_half_size  # 预存的半尺寸列表
         
-        current_pose = part.pose.raw_pose
+        # # === WORLD FRAME ===
+        # current_pose = part.pose.raw_pose
+        # === ROOT FRAME ===
+        current_pose_world_frame = part.pose
+        current_pose_root_frame = self.agent.robot.get_pose().inv() * current_pose_world_frame
+        current_pose = current_pose_root_frame.raw_pose  # (B, 7) [x, y, z, w, x, y, z]
         
         obs_info = {
             # 这里的 pose.p 和 pose.q 在 ManiSkill 封装下通常支持 Batch
