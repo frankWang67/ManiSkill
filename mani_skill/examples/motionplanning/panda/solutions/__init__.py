@@ -11,3 +11,8 @@ from .draw_svg import solve as solveDrawSVG
 from .draw_triangle import solve as solveDrawTriangle
 from .stack_pyramid import solve as solveStackPyramid
 from .obstacle_tasks import solveDeepBox, solveShelf, solveBarrier
+from .make_iced_coffee import solve as solveMakeIcedCoffee
+from .open_door import solve as solveOpenDoor
+from .hang_mug import solve as solveHangMug
+from .turn_on_sink_faucet import solve as solveTurnOnSinkFaucet
+from .pick_place_toaster_to_counter import solve as solvePickPlaceToasterToCounter

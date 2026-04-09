@@ -56,6 +56,7 @@ class Args:
     """Seed(s) for random actions and simulator. Can be a single integer or a list of integers. Default is None (no seeds)"""
 
 def main(args: Args):
+    assert args.control_mode in ["pd_ee_delta_pose", "pd_joint_delta_pos"], "Control mode must be either pd_ee_delta_pose or pd_joint_delta_pos"
     if args.render_mode == "none":
         args.render_mode = None
     np.set_printoptions(suppress=True, precision=3)
@@ -115,6 +116,8 @@ def main(args: Args):
     while True:
         action = env.action_space.sample() if env.action_space is not None else None
         action[:] = 0.0
+        if args.control_mode == "pd_ee_delta_pose":
+            action[3] = 1.0
         obs, reward, terminated, truncated, info = env.step(action)
         if verbose:
             print("reward", reward)

@@ -13,7 +13,7 @@ from tqdm import tqdm
 import os.path as osp
 from mani_skill.utils.wrappers.record import RecordEpisode
 from mani_skill.trajectory.merge_trajectory import merge_trajectories
-from mani_skill.examples.motionplanning.panda.solutions import solvePushCube, solvePickCube, solveStackCube, solvePegInsertionSide, solvePlugCharger, solvePullCubeTool, solveLiftPegUpright, solvePullCube, solveDrawTriangle, solveDrawSVG, solvePlaceSphere, solveStackPyramid, solveDeepBox, solveShelf, solveBarrier
+from mani_skill.examples.motionplanning.panda.solutions import solvePushCube, solvePickCube, solveStackCube, solvePegInsertionSide, solvePlugCharger, solvePullCubeTool, solveLiftPegUpright, solvePullCube, solveDrawTriangle, solveDrawSVG, solvePlaceSphere, solveStackPyramid, solveDeepBox, solveShelf, solveBarrier, solveMakeIcedCoffee, solveOpenDoor, solveHangMug, solveTurnOnSinkFaucet, solvePickPlaceToasterToCounter
 MP_SOLUTIONS = {
     "DrawTriangle-v1": solveDrawTriangle,
     "PickCube-v1": solvePickCube,
@@ -30,6 +30,11 @@ MP_SOLUTIONS = {
     "PickFromDeepBox-v1": solveDeepBox,
     "PickFromShelf-v1": solveShelf,
     "PickBehindBarrier-v1": solveBarrier,
+    "MakeIcedCoffee-v1": solveMakeIcedCoffee,
+    "OpenDoor-v1": solveOpenDoor,
+    "HangMug-v1": solveHangMug,
+    "TurnOnSinkFaucet-v1": solveTurnOnSinkFaucet,
+    "PickPlaceToasterToCounter-v1": solvePickPlaceToasterToCounter,
 }
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -51,17 +56,19 @@ def parse_args(args=None):
 
 def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
     env_id = args.env_id
-    env = gym.make(
-        env_id,
-        robot_uids=args.robot,
+    env_kwargs = dict(
         obs_mode=args.obs_mode,
         control_mode="pd_joint_pos",
         render_mode=args.render_mode,
         sensor_configs=dict(shader_pack=args.shader),
         human_render_camera_configs=dict(shader_pack=args.shader),
         viewer_camera_configs=dict(shader_pack=args.shader),
-        sim_backend=args.sim_backend
+        sim_backend=args.sim_backend,
+        # harder=True
     )
+    if args.robot is not None:
+        env_kwargs["robot_uids"] = args.robot
+    env = gym.make(env_id, **env_kwargs)
     if env_id not in MP_SOLUTIONS:
         raise RuntimeError(f"No already written motion planning solutions for {env_id}. Available options are {list(MP_SOLUTIONS.keys())}")
 
@@ -116,13 +123,19 @@ def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
             env.flush_trajectory()
             if args.save_video:
                 env.flush_video()
+            if len(solution_episode_lengths) > 0:
+                avg_episode_length = np.mean(solution_episode_lengths)
+                max_episode_length = np.max(solution_episode_lengths)
+            else:
+                avg_episode_length = np.nan
+                max_episode_length = np.nan
             pbar.update(1)
             pbar.set_postfix(
                 dict(
                     success_rate=np.mean(successes),
                     failed_motion_plan_rate=failed_motion_plans / (seed + 1),
-                    avg_episode_length=np.mean(solution_episode_lengths),
-                    max_episode_length=np.max(solution_episode_lengths),
+                    avg_episode_length=avg_episode_length,
+                    max_episode_length=max_episode_length,
                     # min_episode_length=np.min(solution_episode_lengths)
                 )
             )

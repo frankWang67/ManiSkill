@@ -18,3 +18,8 @@ from .push_t import PushTEnv
 from .pull_cube_tool import PullCubeToolEnv
 from .stack_pyramid import StackPyramidEnv
 from .obstacle_tasks import PickFromDeepBoxEnv, PickFromShelfEnv, PickBehindBarrierEnv
+from .make_iced_coffee import MakeIcedCoffeeEnv
+from .open_door import OpenDoorEnv
+from .hang_mug import HangMugEnv
+from .turn_on_sink_faucet import TurnOnSinkFaucetEnv
+from .pick_place_toaster_to_counter import PickPlaceToasterToCounterEnv

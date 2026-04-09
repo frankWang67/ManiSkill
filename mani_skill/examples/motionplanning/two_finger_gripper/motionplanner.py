@@ -42,6 +42,22 @@ class TwoFingerGripperMotionPlanningSolver(BaseMotionPlanningSolver):
     
     def follow_path(self, result, refine_steps: int = 0):
         n_step = result["position"].shape[0]
+        if n_step == 0:
+            qpos = self.robot.get_qpos()[0, : len(self.planner.joint_vel_limits)].cpu().numpy()
+            if self.control_mode == "pd_joint_pos_vel":
+                qvel = np.zeros_like(qpos)
+                action = np.hstack([qpos, qvel, self.gripper_state])
+            else:
+                action = np.hstack([qpos, self.gripper_state])
+            obs, reward, terminated, truncated, info = self.env.step(action)
+            self.elapsed_steps += 1
+            if self.print_env_info:
+                print(
+                    f"[{self.elapsed_steps:3}] Env Output: reward={reward} info={info}"
+                )
+            if self.vis:
+                self.base_env.render_human()
+            return obs, reward, terminated, truncated, info
         for i in range(n_step + refine_steps):
             qpos = result["position"][min(i, n_step - 1)]
             if self.control_mode == "pd_joint_pos_vel":

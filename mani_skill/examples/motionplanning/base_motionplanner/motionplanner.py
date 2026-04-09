@@ -31,6 +31,9 @@ class BaseMotionPlanningSolver:
 
         self.planner = self.setup_planner()
         self.control_mode = self.base_env.control_mode
+        self.active_joint_names = [joint.get_name() for joint in self.robot.get_active_joints()]
+        self.arm_joint_indices, self.non_arm_joint_indices = self._infer_arm_joint_indices()
+        self.ik_reference_qpos = self.robot.get_qpos().cpu().numpy()[0].copy()
 
         self.debug = debug
         self.vis = vis
@@ -41,6 +44,48 @@ class BaseMotionPlanningSolver:
         self.use_point_cloud = False
         self.collision_pts_changed = False
         self.all_collision_pts = None
+
+    def _infer_arm_joint_indices(self):
+        controller = getattr(self.env_agent, "controller", None)
+        controllers = getattr(controller, "controllers", None)
+        arm_joint_names = None
+        if isinstance(controllers, dict) and "arm" in controllers:
+            arm_config = getattr(controllers["arm"], "config", None)
+            joint_names = getattr(arm_config, "joint_names", None)
+            if joint_names is not None:
+                arm_joint_names = set(joint_names)
+
+        if arm_joint_names is None:
+            arm_dof = len(self.planner.joint_vel_limits)
+            return list(range(arm_dof)), []
+
+        arm_joint_indices = [
+            i for i, name in enumerate(self.active_joint_names) if name in arm_joint_names
+        ]
+        if not arm_joint_indices:
+            arm_dof = len(self.planner.joint_vel_limits)
+            return list(range(arm_dof)), []
+
+        non_arm_joint_indices = [
+            i for i in range(len(self.active_joint_names)) if i not in arm_joint_indices
+        ]
+        return arm_joint_indices, non_arm_joint_indices
+
+    def _get_current_qpos(self):
+        return self.robot.get_qpos().cpu().numpy()[0]
+
+    def _get_current_arm_qpos(self):
+        qpos = self._get_current_qpos()
+        arm_dof = len(self.planner.joint_vel_limits)
+        return qpos[:arm_dof]
+
+    def _get_ik_seed_qpos(self):
+        qpos = self._get_current_qpos().copy()
+        if self.non_arm_joint_indices:
+            qpos[self.non_arm_joint_indices] = self.ik_reference_qpos[
+                self.non_arm_joint_indices
+            ]
+        return qpos
 
     def render_wait(self):
         if not self.vis or not self.debug:
@@ -102,7 +147,7 @@ class BaseMotionPlanningSolver:
         pose = self._transform_pose_for_planning(pose)
         result = self.planner.plan_qpos_to_pose(
             np.concatenate([pose.p, pose.q]),
-            self.robot.get_qpos().cpu().numpy()[0],
+            self._get_ik_seed_qpos(),
             time_step=self.base_env.control_timestep,
             use_point_cloud=self.use_point_cloud,
             rrt_range=0.0,
@@ -127,9 +172,12 @@ class BaseMotionPlanningSolver:
         pose = self._transform_pose_for_planning(pose)
         result = self.planner.plan_qpos_to_pose(
             np.concatenate([pose.p, pose.q]),
-            self.robot.get_qpos().cpu().numpy()[0],
+            self._get_ik_seed_qpos(),
             time_step=self.base_env.control_timestep,
             use_point_cloud=self.use_point_cloud,
+            rrt_range=0.0,
+            planning_time=1,
+            planner_name="RRTConnect",
             wrt_world=True,
         )
         if result["status"] != "Success":
@@ -150,14 +198,14 @@ class BaseMotionPlanningSolver:
         pose = self._transform_pose_for_planning(pose)
         result = self.planner.plan_screw(
             np.concatenate([pose.p, pose.q]),
-            self.robot.get_qpos().cpu().numpy()[0],
+            self._get_current_arm_qpos(),
             time_step=self.base_env.control_timestep,
             use_point_cloud=self.use_point_cloud,
         )
         if result["status"] != "Success":
             result = self.planner.plan_screw(
                 np.concatenate([pose.p, pose.q]),
-                self.robot.get_qpos().cpu().numpy()[0],
+                self._get_current_arm_qpos(),
                 time_step=self.base_env.control_timestep,
                 use_point_cloud=self.use_point_cloud,
             )
