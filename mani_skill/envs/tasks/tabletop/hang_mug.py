@@ -6,6 +6,7 @@ import sapien
 import torch
 import trimesh
 
+from mani_skill import ASSET_DIR
 from mani_skill.agents.robots import (
     FloatingRobotiq2F85GripperWristCamera,
     PandaRobotiqWristCamera,
@@ -45,10 +46,9 @@ class HangMugEnv(BaseEnv):
 
     # RoboTwin initial poses used in hanging_mug.py
     mug_base_quat = np.array([0.7071068, 0.7071068, 0.0, 0.0], dtype=np.float32)
-    rack_base_quat = np.array([-0.22, -0.22, 0.67, 0.67], dtype=np.float32)
-    bottle_half_height = 0.06
-    bottle_radius = 0.018
-    blocker_half_size = [0.03, 0.05, 0.12]
+    left_rack_base_quat = np.array([-0.22, -0.22, 0.67, 0.67], dtype=np.float32)
+    right_rack_base_quat = np.array([0.22, 0.22, 0.67, 0.67], dtype=np.float32)
+    harder_obstacle_model_ids = ["006_mustard_bottle", "003_cracker_box"]
     hang_support_inset = 0.006
     hang_position_tolerance = 0.03
     hang_success_position_tolerance = 0.075
@@ -69,6 +69,17 @@ class HangMugEnv(BaseEnv):
         self.harder = harder
         self._rt_objects_root = Path("/home/wshf/RoboTwin/assets/objects")
         self._mug_model_id = 0
+        ycb_meta = load_json(ASSET_DIR / "assets/mani_skill2_ycb/info_pick_v0.json")
+        self._harder_obstacle_meta = {}
+        for model_id in self.harder_obstacle_model_ids:
+            info = ycb_meta[model_id]
+            scale = float(info.get("scales", [1.0])[0])
+            bbox_min = np.array(info["bbox"]["min"], dtype=np.float32) * scale
+            bbox_max = np.array(info["bbox"]["max"], dtype=np.float32) * scale
+            self._harder_obstacle_meta[model_id] = dict(
+                half_extents=(bbox_max - bbox_min) / 2.0,
+                bottom_z=float(-bbox_min[2]),
+            )
         if reconfiguration_freq is None:
             reconfiguration_freq = 1 if num_envs == 1 else 0
         super().__init__(
@@ -117,6 +128,7 @@ class HangMugEnv(BaseEnv):
         scale: list[float],
         name: str,
         dynamic: bool,
+        kinematic: bool = False,
         density: float = 100.0,
     ):
         b = self.scene.create_actor_builder()
@@ -127,6 +139,12 @@ class HangMugEnv(BaseEnv):
                 scale=scale,
                 density=density,
             )
+        elif kinematic:
+            b.set_physx_body_type("kinematic")
+            b.add_multiple_convex_collisions_from_file(
+                filename=str(collision_file),
+                scale=scale,
+            )
         else:
             b.set_physx_body_type("static")
             b.add_multiple_convex_collisions_from_file(
@@ -136,6 +154,27 @@ class HangMugEnv(BaseEnv):
         b.add_visual_from_file(filename=str(visual_file), scale=scale)
         b.initial_pose = sapien.Pose(p=[0, 0, -10])
         return b.build(name=name)
+
+    def _build_ycb_actor(
+        self,
+        model_id: str,
+        name: str,
+        body_type: str = "kinematic",
+        add_collision: bool = True,
+        add_visual: bool = True,
+    ):
+        builder = actors.get_actor_builder(
+            self.scene,
+            id=f"ycb:{model_id}",
+            add_collision=add_collision,
+            add_visual=add_visual,
+        )
+        builder.initial_pose = sapien.Pose([0, 0, -10])
+        if body_type == "dynamic":
+            return builder.build(name=name)
+        if body_type == "kinematic":
+            return builder.build_kinematic(name=name)
+        raise ValueError(f"Unsupported body_type={body_type}")
 
     def _infer_rack_branch_geometry_local(self, rack_visual_file: Path, branch_axis_local: np.ndarray):
         # The rack has a single short hanging branch. Use the annotated
@@ -184,13 +223,26 @@ class HangMugEnv(BaseEnv):
             dynamic=True,
             density=120.0,
         )
-        self.hanger = self._build_mesh_actor(
+        self.hanger_left = self._build_mesh_actor(
             rack_visual,
             rack_collision,
             self._rack_meta["scale"],
-            name="hanger",
+            name="hanger_left",
             dynamic=False,
+            kinematic=True,
         )
+        self.hanger_right = self._build_mesh_actor(
+            rack_visual,
+            rack_collision,
+            self._rack_meta["scale"],
+            name="hanger_right",
+            dynamic=False,
+            kinematic=True,
+        )
+        self.hangers = [self.hanger_left, self.hanger_right]
+        # Backward compatibility for existing downstream code that references
+        # env.hanger (now aliases the left hanger).
+        self.hanger = self.hanger_left
 
         # Mug handle functional point (id=0) from RoboTwin metadata.
         mug_handle_tf = np.array(self._mug_meta["functional_matrix"][0], dtype=np.float32)
@@ -240,33 +292,37 @@ class HangMugEnv(BaseEnv):
         self._hidden_objects.append(self.goal_site)
 
     def _build_harder_obstacles(self):
-        b = self.scene.create_actor_builder()
-        b.add_box_collision(half_size=self.blocker_half_size)
-        b.add_box_visual(half_size=self.blocker_half_size)
-        b.initial_pose = sapien.Pose(p=[0, 0, -10])
-        self.branch_blocker = b.build_kinematic(name="branch_blocker")
-
-        b = self.scene.create_actor_builder()
-        b.add_cylinder_collision(radius=self.bottle_radius, half_length=self.bottle_half_height)
-        b.add_cylinder_visual(radius=self.bottle_radius, half_length=self.bottle_half_height)
-        b.initial_pose = sapien.Pose(p=[0, 0, -10])
-        self.blocker_bottle = b.build_kinematic(name="blocker_bottle")
+        # Use everyday YCB objects as harder-mode blockers.
+        self.branch_blocker = self._build_ycb_actor(
+            self.harder_obstacle_model_ids[0], "branch_blocker", body_type="kinematic"
+        )
+        self.blocker_bottle = self._build_ycb_actor(
+            self.harder_obstacle_model_ids[1], "blocker_bottle", body_type="kinematic"
+        )
 
     def _branch_target_points_world(self, env_idx: Optional[torch.Tensor] = None):
         if env_idx is None:
-            T = self.hanger.pose.to_transformation_matrix()
             b = self.num_envs
         else:
-            T = self.hanger.pose[env_idx].to_transformation_matrix()
             b = len(env_idx)
-        tip = self.branch_tip_local.to(self.device)[None, :].repeat(b, 1)
-        root = self.branch_root_local.to(self.device)[None, :].repeat(b, 1)
-        return transform_points(T, tip), transform_points(T, root)
+        tip_local = self.branch_tip_local.to(self.device)[None, :].repeat(b, 1)
+        root_local = self.branch_root_local.to(self.device)[None, :].repeat(b, 1)
+
+        all_tip = []
+        all_root = []
+        for hanger in self.hangers:
+            if env_idx is None:
+                T = hanger.pose.to_transformation_matrix()
+            else:
+                T = hanger.pose[env_idx].to_transformation_matrix()
+            all_tip.append(transform_points(T, tip_local))
+            all_root.append(transform_points(T, root_local))
+        return torch.stack(all_tip, dim=1), torch.stack(all_root, dim=1)
 
     def _branch_support_points_world(self, env_idx: Optional[torch.Tensor] = None):
         branch_tip, branch_root = self._branch_target_points_world(env_idx)
         inward_axis = branch_root - branch_tip
-        inward_axis = inward_axis / (torch.linalg.norm(inward_axis, dim=1, keepdim=True) + 1e-8)
+        inward_axis = inward_axis / (torch.linalg.norm(inward_axis, dim=2, keepdim=True) + 1e-8)
         support = branch_tip + inward_axis * self.hang_support_inset
         branch_dir = -inward_axis
         return support, branch_tip, branch_root, branch_dir
@@ -306,22 +362,33 @@ class HangMugEnv(BaseEnv):
             b = len(env_idx)
             self.table_scene.initialize(env_idx)
 
-            # Rack spawn (RoboTwin-style ranges).
-            rack_xyz = torch.zeros((b, 3), device=self.device)
-            rack_xyz[:, 0] = torch.rand((b), device=self.device) * 0.05 + 0.07
-            rack_xyz[:, 1] = torch.rand((b), device=self.device) * 0.04 + 0.20
-            rack_xyz[:, 2] = self.rack_bottom_to_com + 0.001
+            # Two symmetric rack spawns (robot view: left/right).
+            rack_x = torch.rand((b), device=self.device) * 0.05 - 0.05
+            rack_y_abs = torch.rand((b), device=self.device) * 0.04 + 0.20
+            rack_z = torch.ones((b), device=self.device) * (self.rack_bottom_to_com + 0.001)
+            rack_xyz_left = torch.stack([rack_x, rack_y_abs, rack_z], dim=1)
+            rack_xyz_right = torch.stack([rack_x, -rack_y_abs, rack_z], dim=1)
 
             base_q = common.to_tensor(
-                np.tile(self.rack_base_quat[None, :], (b, 1)), device=self.device
+                np.tile(self.left_rack_base_quat[None, :], (b, 1)), device=self.device
             )
             euler = torch.zeros((b, 3), device=self.device)
             euler[:, 1] = torch.rand((b), device=self.device) * 0.4 - 0.2
             delta_q = rotation_conversions.matrix_to_quaternion(
                 rotation_conversions.euler_angles_to_matrix(euler, "XYZ")
             )
-            rack_q = rotation_conversions.quaternion_multiply(base_q, delta_q)
-            self.hanger.set_pose(Pose.create_from_pq(rack_xyz, rack_q))
+            rack_q_left = rotation_conversions.quaternion_multiply(base_q, delta_q)
+
+            base_q = common.to_tensor(
+                np.tile(self.right_rack_base_quat[None, :], (b, 1)), device=self.device
+            )
+            delta_q = rotation_conversions.matrix_to_quaternion(
+                rotation_conversions.euler_angles_to_matrix(euler, "XYZ")
+            )
+            rack_q_right = rotation_conversions.quaternion_multiply(base_q, delta_q)
+
+            self.hanger_left.set_pose(Pose.create_from_pq(rack_xyz_left, rack_q_left))
+            self.hanger_right.set_pose(Pose.create_from_pq(rack_xyz_right, rack_q_right))
 
             # Mug spawn (RoboTwin-style ranges).
             mug_xyz = torch.zeros((b, 3), device=self.device)
@@ -347,30 +414,64 @@ class HangMugEnv(BaseEnv):
                     (self.num_envs,), -1, dtype=torch.int64, device=self.device
                 )
             blocked_branch = torch.full((b,), -1, dtype=torch.int64, device=self.device)
+            if not hasattr(self, "goal_branch"):
+                self.goal_branch = torch.zeros(
+                    (self.num_envs,), dtype=torch.int64, device=self.device
+                )
+            goal_branch = torch.zeros((b,), dtype=torch.int64, device=self.device)
 
             hide_xyz = torch.zeros((b, 3), device=self.device)
             hide_xyz[:, 2] = -10
+            branch_support, branch_tip, branch_root, _ = self._branch_support_points_world(
+                env_idx
+            )
             if self.harder:
-                branch_tip, branch_root = self._branch_target_points_world(env_idx)
-                axis = branch_root - branch_tip
-                axis = axis / (torch.linalg.norm(axis, dim=1, keepdim=True) + 1e-8)
+                blocked_branch = torch.randint(0, 2, (b,), device=self.device, dtype=torch.int64)
+                batch_idx = torch.arange(b, device=self.device)
+                blocked_tip = branch_tip[batch_idx, blocked_branch]
+                blocked_root = branch_root[batch_idx, blocked_branch]
 
-                blocker_pos = branch_tip + axis * 0.012
-                blocker_pos[:, 2] += 0.02
-                blocker_q = common.to_tensor(
-                    np.tile(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32), (b, 1)),
-                    device=self.device,
+                axis = blocked_root - blocked_tip
+                axis = axis / (torch.linalg.norm(axis, dim=1, keepdim=True) + 1e-8)
+                side = torch.stack([-axis[:, 1], axis[:, 0], torch.zeros_like(axis[:, 0])], dim=1)
+                side = side / (torch.linalg.norm(side, dim=1, keepdim=True) + 1e-8)
+                table_top_z = (
+                    self.table_scene.table.pose.p[env_idx, 2] + self.table_scene.table_height
+                )
+                blocker_pos = blocked_tip + axis * 0.010 + side * 0.020
+                bottle_pos = blocked_tip - axis * 0.060 - side * 0.018
+                blocker_pos[:, 2] = (
+                    table_top_z
+                    + self._harder_obstacle_meta[self.harder_obstacle_model_ids[0]]["bottom_z"]
+                    + 0.002
+                )
+                bottle_pos[:, 2] = (
+                    table_top_z
+                    + self._harder_obstacle_meta[self.harder_obstacle_model_ids[1]]["bottom_z"]
+                    + 0.002
+                )
+
+                yaw = torch.atan2(axis[:, 1], axis[:, 0]) + torch.pi / 2
+                blocker_euler = torch.zeros((b, 3), device=self.device)
+                blocker_euler[:, 2] = yaw
+                blocker_q = rotation_conversions.matrix_to_quaternion(
+                    rotation_conversions.euler_angles_to_matrix(blocker_euler, "XYZ")
+                )
+                bottle_euler = torch.zeros((b, 3), device=self.device)
+                bottle_euler[:, 2] = yaw + np.pi / 2
+                bottle_q = rotation_conversions.matrix_to_quaternion(
+                    rotation_conversions.euler_angles_to_matrix(bottle_euler, "XYZ")
                 )
                 self.branch_blocker.set_pose(Pose.create_from_pq(blocker_pos, blocker_q))
-
-                bottle_pos = branch_tip + axis * 0.03
-                bottle_pos[:, 2] = self.bottle_half_height + 0.002
-                self.blocker_bottle.set_pose(Pose.create_from_pq(bottle_pos, blocker_q))
+                self.blocker_bottle.set_pose(Pose.create_from_pq(bottle_pos, bottle_q))
+                goal_branch = 1 - blocked_branch
             else:
                 self.branch_blocker.set_pose(Pose.create_from_pq(hide_xyz))
                 self.blocker_bottle.set_pose(Pose.create_from_pq(hide_xyz))
+                goal_branch = torch.randint(0, 2, (b,), device=self.device, dtype=torch.int64)
 
             self.blocked_branch[env_idx] = blocked_branch
+            self.goal_branch[env_idx] = goal_branch
             if not hasattr(self, "released_hang_steps"):
                 self.released_hang_steps = torch.zeros(
                     (self.num_envs,), dtype=torch.int32, device=self.device
@@ -381,8 +482,9 @@ class HangMugEnv(BaseEnv):
             self.released_hang_steps[env_idx] = 0
             self._released_hang_last_step[env_idx] = -1
 
-            # Goal marker is the actual hanging support point on the usable branch.
-            target, _, _, _ = self._branch_support_points_world(env_idx)
+            # Goal marker indicates one valid target branch.
+            batch_idx = torch.arange(b, device=self.device)
+            target = branch_support[batch_idx, goal_branch]
             self.goal_site.set_pose(Pose.create_from_pq(target))
 
             if self.gpu_sim_enabled:
@@ -392,27 +494,50 @@ class HangMugEnv(BaseEnv):
 
     def evaluate(self):
         mug_handle = self._mug_handle_center_world()
-        branch_tip, branch_root = self._branch_target_points_world()
-        _, _, _, branch_dir = self._branch_support_points_world()
+        branch_support, branch_tip, branch_root, branch_dir = self._branch_support_points_world()
         mug_com = self.mug.pose.p
 
-        # Treat the whole branch segment (tip -> root) as valid hanging support.
+        # Treat each branch segment (tip -> root) as valid hanging support.
         branch_vec = branch_root - branch_tip
-        branch_len_sq = torch.sum(branch_vec * branch_vec, dim=1, keepdim=True).clamp_min(1e-8)
-        proj = torch.sum((mug_handle - branch_tip) * branch_vec, dim=1, keepdim=True) / branch_len_sq
+        branch_len_sq = torch.sum(branch_vec * branch_vec, dim=2, keepdim=True).clamp_min(1e-8)
+        rel_handle = mug_handle[:, None, :] - branch_tip
+        proj = torch.sum(rel_handle * branch_vec, dim=2, keepdim=True) / branch_len_sq
         proj = torch.clamp(proj, 0.0, 1.0)
-        branch_support = branch_tip + proj * branch_vec
-        best_dist = torch.linalg.norm(mug_handle - branch_support, axis=1)
-        nearest_branch = torch.zeros((self.num_envs,), dtype=torch.int64, device=self.device)
-        allowed = torch.ones_like(nearest_branch, dtype=torch.bool)
+        closest_on_branch = branch_tip + proj * branch_vec
+        branch_dist_all = torch.linalg.norm(mug_handle[:, None, :] - closest_on_branch, axis=2)
+        nearest_branch = torch.argmin(branch_dist_all, dim=1)
+
+        allowed_branches = torch.ones(
+            (self.num_envs, len(self.hangers)), dtype=torch.bool, device=self.device
+        )
+        if self.harder:
+            valid_blocked = self.blocked_branch >= 0
+            if torch.any(valid_blocked):
+                env_idx = torch.arange(self.num_envs, device=self.device)[valid_blocked]
+                blocked = self.blocked_branch[valid_blocked]
+                allowed_branches[env_idx, blocked] = False
+        allowed = allowed_branches[
+            torch.arange(self.num_envs, device=self.device), nearest_branch
+        ]
+
+        masked_branch_dist = branch_dist_all.clone()
+        masked_branch_dist[~allowed_branches] = torch.inf
+        best_dist, best_allowed_branch = torch.min(masked_branch_dist, dim=1)
         # Success checking is intentionally looser than dense reward shaping:
         # a mug can be validly hung while the annotated handle point is not
         # exactly centered on the branch axis (e.g. when it settles near root).
         is_handle_aligned = best_dist < self.hang_success_position_tolerance
 
-        contact_force = torch.linalg.norm(
-            self.scene.get_pairwise_contact_forces(self.hanger, self.mug), axis=1
+        hanger_contact_forces = torch.stack(
+            [
+                torch.linalg.norm(
+                    self.scene.get_pairwise_contact_forces(hanger, self.mug), axis=1
+                )
+                for hanger in self.hangers
+            ],
+            dim=1,
         )
+        contact_force = torch.max(hanger_contact_forces, dim=1).values
         has_contact = contact_force > 0.02
 
         table_contact_force = torch.linalg.norm(
@@ -439,22 +564,35 @@ class HangMugEnv(BaseEnv):
         is_grasped = self.agent.is_grasping(self.mug)
         is_robot_static = self.agent.is_static(0.15)
         is_mug_static = self.mug.is_static(lin_thresh=0.01, ang_thresh=0.2)
-        min_branch_z = torch.minimum(branch_tip[:, 2], branch_root[:, 2])
-        is_elevated = mug_handle[:, 2] > (min_branch_z - self.hang_elevation_tolerance)
+        min_branch_z = torch.minimum(branch_tip[:, :, 2], branch_root[:, :, 2])
+        is_elevated_all = mug_handle[:, None, 2] > (
+            min_branch_z - self.hang_elevation_tolerance
+        )
         table_top_z = self.table_scene.table.pose.p[:, 2] + self.table_scene.table_height
         is_mug_above_table = mug_com[:, 2] > (table_top_z + 0.08)
-        is_mug_below_branch = mug_com[:, 2] < (branch_support[:, 2] - 0.02)
+        is_mug_below_branch_all = mug_com[:, None, 2] < (closest_on_branch[:, :, 2] - 0.02)
         # Contact force between hanger/mug can be numerically zero for some
         # stable hooked states, so success should primarily rely on geometry
         # and stability rather than force threshold alone.
-        is_hung = (
-            is_handle_aligned
-            & allowed
-            & is_elevated
-            & is_unobstructed
-            & is_mug_above_table
-            & is_mug_below_branch
+        is_hung_per_branch = (
+            (branch_dist_all < self.hang_success_position_tolerance)
+            & allowed_branches
+            & is_elevated_all
+            & is_unobstructed[:, None]
+            & is_mug_above_table[:, None]
+            & is_mug_below_branch_all
         )
+        is_hung = torch.any(is_hung_per_branch, dim=1)
+
+        env_idx = torch.arange(self.num_envs, device=self.device)
+        selected_closest = closest_on_branch[env_idx, best_allowed_branch]
+        selected_branch_dir = branch_dir[env_idx, best_allowed_branch]
+        selected_min_branch_z = min_branch_z[env_idx, best_allowed_branch]
+        is_elevated = mug_handle[:, 2] > (
+            selected_min_branch_z - self.hang_elevation_tolerance
+        )
+        is_mug_below_branch = mug_com[:, 2] < (selected_closest[:, 2] - 0.02)
+
         released_hang_candidate = is_hung & (~is_grasped) & is_robot_static & is_mug_static
         self._update_released_hang_counter(released_hang_candidate)
         is_release_stable = self.released_hang_steps >= self.success_settle_steps
@@ -469,7 +607,10 @@ class HangMugEnv(BaseEnv):
             "is_handle_aligned": is_handle_aligned,
             "has_contact": has_contact,
             "allowed_branch": allowed,
+            "allowed_branches": allowed_branches,
+            "best_allowed_branch": best_allowed_branch,
             "blocked_branch": self.blocked_branch,
+            "goal_branch": self.goal_branch,
             "nearest_branch": nearest_branch,
             "is_grasped": is_grasped,
             "is_robot_static": is_robot_static,
@@ -482,12 +623,13 @@ class HangMugEnv(BaseEnv):
             "is_elevated": is_elevated,
             "mug_handle_pos": mug_handle,
             "mug_com_pos": mug_com,
-            "branch_neg_pos": branch_support,
-            "branch_pos_pos": branch_root,
-            "branch_neg_tip_pos": branch_tip,
-            "branch_pos_tip_pos": branch_tip,
-            "branch_dir": branch_dir,
+            "branch_neg_pos": branch_support[:, 1, :],
+            "branch_pos_pos": branch_support[:, 0, :],
+            "branch_neg_tip_pos": branch_tip[:, 1, :],
+            "branch_pos_tip_pos": branch_tip[:, 0, :],
+            "branch_dir": selected_branch_dir,
             "branch_dist": best_dist,
+            "branch_dist_per_branch": branch_dist_all,
             "table_contact_force": table_contact_force,
             "obstacle_contact_force": obstacle_contact_force,
         }
@@ -497,14 +639,19 @@ class HangMugEnv(BaseEnv):
             tcp_pose=self.agent.tcp.pose.raw_pose,
             mug_handle_pos=info["mug_handle_pos"],
             blocked_branch=info["blocked_branch"],
+            goal_branch=info["goal_branch"],
             nearest_branch=info["nearest_branch"],
             is_hung=info["is_hung"],
             branch_dist=info["branch_dist"],
         )
         if self.obs_mode_struct.use_state:
+            hanger_poses = torch.stack(
+                [self.hanger_left.pose.raw_pose, self.hanger_right.pose.raw_pose], dim=1
+            ).reshape(self.num_envs, -1)
             obs.update(
                 mug_pose=self.mug.pose.raw_pose,
-                hanger_pose=self.hanger.pose.raw_pose,
+                hanger_pose=self.hanger_left.pose.raw_pose,
+                hanger_poses=hanger_poses,
                 target_branch_pos=self.goal_site.pose.p,
                 branch_neg_pos=info["branch_neg_pos"],
                 branch_pos_pos=info["branch_pos_pos"],
@@ -513,24 +660,50 @@ class HangMugEnv(BaseEnv):
             )
         return obs
 
-    def get_hang_pose_and_direction(self, env_idx: Optional[int] = None):
+    def get_hang_pose_and_direction(
+        self, branch_idx: Optional[int] = None, env_idx: Optional[int] = None
+    ):
         idx = 0 if env_idx is None else int(env_idx)
+        if branch_idx is None:
+            if hasattr(self, "goal_branch"):
+                branch = int(self.goal_branch[idx].item())
+            else:
+                branch = 0
+        else:
+            branch = int(branch_idx)
+        if branch < 0 or branch >= len(self.hangers):
+            raise ValueError(
+                f"branch_idx={branch} is out of range for {len(self.hangers)} hangers"
+            )
         target, tip, root, branch_dir = self._branch_support_points_world()
         return {
-            "target": target[idx],
-            "tip": tip[idx],
-            "root": root[idx],
-            "approach": branch_dir[idx],
+            "target": target[idx, branch],
+            "tip": tip[idx, branch],
+            "root": root[idx, branch],
+            "approach": branch_dir[idx, branch],
         }
 
-    def get_hang_goal_pose(self, env_idx: Optional[int] = None):
+    def get_hang_goal_pose(
+        self, branch_idx: Optional[int] = None, env_idx: Optional[int] = None
+    ):
         idx = 0 if env_idx is None else int(env_idx)
+        if branch_idx is None:
+            if hasattr(self, "goal_branch"):
+                branch = int(self.goal_branch[idx].item())
+            else:
+                branch = 0
+        else:
+            branch = int(branch_idx)
+        if branch < 0 or branch >= len(self.hangers):
+            raise ValueError(
+                f"branch_idx={branch} is out of range for {len(self.hangers)} hangers"
+            )
         target, tip, root, branch_axis = self._branch_support_points_world()
-        target = target[idx]
-        tip = tip[idx]
-        root = root[idx]
-        branch_axis = branch_axis[idx]
-        hanger_rot = self.hanger.pose.to_transformation_matrix()[idx, :3, :3]
+        target = target[idx, branch]
+        tip = tip[idx, branch]
+        root = root[idx, branch]
+        branch_axis = branch_axis[idx, branch]
+        hanger_rot = self.hangers[branch].pose.to_transformation_matrix()[idx, :3, :3]
         rack_fun_rot = hanger_rot @ self.rack_function_local_rot.to(self.device)
         mug_rot = rack_fun_rot @ self.mug_handle_local_rot.to(self.device).transpose(0, 1)
         mug_q = rotation_conversions.matrix_to_quaternion(mug_rot[None, :, :])[0]
@@ -552,20 +725,18 @@ class HangMugEnv(BaseEnv):
         if not self.harder:
             return []
         out = []
-        for actor, extent in [
-            (self.branch_blocker, self.blocker_half_size),
-            (
-                self.blocker_bottle,
-                [self.bottle_radius, self.bottle_radius, self.bottle_half_height],
-            ),
+        for actor, model_id in [
+            (self.branch_blocker, self.harder_obstacle_model_ids[0]),
+            (self.blocker_bottle, self.harder_obstacle_model_ids[1]),
         ]:
             raw_pose = actor.pose.raw_pose
+            half_extents = self._harder_obstacle_meta[model_id]["half_extents"]
             out.append(
                 {
                     "center": raw_pose[:, :3],
                     "quat": raw_pose[:, 3:],
                     "extent": torch.tensor(
-                        extent, dtype=torch.float32, device=raw_pose.device
+                        half_extents, dtype=torch.float32, device=raw_pose.device
                     ).expand(raw_pose.shape[0], 3),
                 }
             )

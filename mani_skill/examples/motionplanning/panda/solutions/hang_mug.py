@@ -81,7 +81,7 @@ def _quat_angle(q0, q1):
 def _move(planner, pose: sapien.Pose, dry_run: bool = False):
     res = planner.move_to_pose_with_screw(pose, dry_run=dry_run)
     if res == -1:
-        res = planner.move_to_pose_with_RRTConnect(pose, dry_run=dry_run)
+        res = planner.move_to_pose_with_RRTStar(pose, dry_run=dry_run)
     return res
 
 
@@ -263,11 +263,15 @@ def solve(env, seed=None, debug=False, vis=False):
         # ------------------------------------------------------------------ #
         # 3) Compute target pose from hanger pose
         # ------------------------------------------------------------------ #
-        hanger_tf = env.hanger.pose.to_transformation_matrix()[0].cpu().numpy()
+        rng = np.random.default_rng(seed)
+        hangers = env.hangers if hasattr(env, "hangers") else [env.hanger]
+        target_branch_idx = int(rng.integers(0, len(hangers)))
+
+        hanger_tf = hangers[target_branch_idx].pose.to_transformation_matrix()[0].cpu().numpy()
         target_mug_pose = sapien.Pose(hanger_tf @ HANGER_TO_MUG_REL_POSE)
         target_tcp_pose = target_mug_pose * mug_to_tcp
 
-        hang_pose = env.get_hang_pose_and_direction()
+        hang_pose = env.get_hang_pose_and_direction(branch_idx=target_branch_idx)
         branch_dir = _normalize(_first_np(hang_pose["approach"]))
 
         # ------------------------------------------------------------------ #

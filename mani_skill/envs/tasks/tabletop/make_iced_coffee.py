@@ -42,7 +42,7 @@ class MakeIcedCoffeeEnv(BaseEnv):
 
     **Difficulty Levels:**
     - default: no obstacles beyond dish/cup.
-    - harder: sampled combinations of tall transfer blockers, table objects, and overhead blockers.
+    - harder: sampled combinations of transfer blockers and table clutter.
 
     **Success Conditions:**
     - the ice cube is inside the cup.
@@ -66,6 +66,10 @@ class MakeIcedCoffeeEnv(BaseEnv):
 
     dish_model_id = "024_bowl"
     cup_model_id = "025_mug"
+    harder_transfer_obstacle_model_ids = [
+        "021_bleach_cleanser",
+        "003_cracker_box",
+    ]
     harder_table_obstacle_model_ids = [
         "006_mustard_bottle",
         "003_cracker_box",
@@ -91,17 +95,17 @@ class MakeIcedCoffeeEnv(BaseEnv):
         self.cup_wall_thickness = 0.004
         self.cup_inner_height = 0.085
         self.cup_bottom_thickness = 0.004
-        self.harder_transfer_half_size = np.array([0.028, 0.11, 0.18], dtype=np.float32)
-        self.overhead_half_size = np.array([0.09, 0.08, 0.015], dtype=np.float32)
-        self.overhead_bottom_z = 0.145
 
         ycb_meta = load_json(ASSET_DIR / "assets/mani_skill2_ycb/info_pick_v0.json")
         self._model_meta = dict()
         for model_id in [
             self.dish_model_id,
             self.cup_model_id,
+            *self.harder_transfer_obstacle_model_ids,
             *self.harder_table_obstacle_model_ids,
         ]:
+            if model_id not in ycb_meta:
+                continue
             info = ycb_meta[model_id]
             scale = float(info.get("scales", [1.0])[0])
             bbox_min = np.array(info["bbox"]["min"], dtype=np.float32) * scale
@@ -228,39 +232,21 @@ class MakeIcedCoffeeEnv(BaseEnv):
         builder.initial_pose = sapien.Pose([0, 0, -10])
         return builder.build_kinematic(name=name)
 
-    def _build_box_obstacle(
-        self,
-        name: str,
-        half_size,
-        color=None,
-        add_visual: bool = True,
-    ):
-        builder = self.scene.create_actor_builder()
-        builder.add_box_collision(half_size=half_size)
-        if add_visual:
-            if color is None:
-                color = [0.5, 0.5, 0.5, 1.0]
-            builder.add_box_visual(
-                half_size=half_size, material=create_colored_material(color)
-            )
-        builder.initial_pose = sapien.Pose([0, 0, -10])
-        return builder.build_kinematic(name=name)
-
     def _yaw_to_quat(self, yaw: torch.Tensor):
         q = torch.zeros((yaw.shape[0], 4), device=yaw.device, dtype=yaw.dtype)
         q[:, 0] = torch.cos(yaw / 2)
         q[:, 3] = torch.sin(yaw / 2)
         return q
 
-    def _set_box_obstacle_pose(
+    def _set_ycb_obstacle_pose(
         self,
         actor,
+        model_id: str,
         center_xy: torch.Tensor,
-        half_size: np.ndarray,
         yaw: torch.Tensor,
         active_mask: torch.Tensor,
         hidden_pos: torch.Tensor,
-        center_z: float = None,
+        bottom_height: float = None,
     ):
         b = center_xy.shape[0]
         pos = hidden_pos.clone()
@@ -269,7 +255,11 @@ class MakeIcedCoffeeEnv(BaseEnv):
         if torch.any(active_mask):
             posed = torch.zeros((b, 3), device=center_xy.device, dtype=center_xy.dtype)
             posed[:, :2] = center_xy
-            posed[:, 2] = float(half_size[2] if center_z is None else center_z)
+            base_bottom_z = self._model_meta[model_id]["bottom_z"]
+            if bottom_height is None:
+                posed[:, 2] = float(base_bottom_z)
+            else:
+                posed[:, 2] = float(bottom_height + base_bottom_z)
             pos = torch.where(active_mask[:, None], posed, pos)
             target_quat = self._yaw_to_quat(yaw)
             quat = torch.where(active_mask[:, None], target_quat, quat)
@@ -312,34 +302,17 @@ class MakeIcedCoffeeEnv(BaseEnv):
             add_visual=False,
         )
 
-        self.harder_transfer_obstacles = [
-            self._build_box_obstacle(
-                "harder_transfer_obstacle_0",
-                half_size=self.harder_transfer_half_size,
-                color=[0.42, 0.42, 0.48, 1.0],
-                add_visual=True,
-            ),
-            self._build_box_obstacle(
-                "harder_transfer_obstacle_1",
-                half_size=self.harder_transfer_half_size,
-                color=[0.42, 0.42, 0.48, 1.0],
-                add_visual=True,
-            ),
-        ]
-        self.harder_overhead_obstacles = {
-            "dish": self._build_box_obstacle(
-                "harder_overhead_dish",
-                half_size=self.overhead_half_size,
-                color=[0.58, 0.56, 0.52, 1.0],
-                add_visual=True,
-            ),
-            "cup": self._build_box_obstacle(
-                "harder_overhead_cup",
-                half_size=self.overhead_half_size,
-                color=[0.58, 0.56, 0.52, 1.0],
-                add_visual=True,
-            ),
-        }
+        self.harder_transfer_obstacles = []
+        for i, model_id in enumerate(self.harder_transfer_obstacle_model_ids):
+            self.harder_transfer_obstacles.append(
+                self._build_ycb_actor(
+                    model_id,
+                    f"harder_transfer_obstacle_{i}",
+                    body_type="kinematic",
+                    add_collision=True,
+                    add_visual=True,
+                )
+            )
 
         self.harder_table_obstacles = []
         for i, model_id in enumerate(self.harder_table_obstacle_model_ids):
@@ -418,11 +391,7 @@ class MakeIcedCoffeeEnv(BaseEnv):
 
             hidden_pos = torch.zeros((b, 3), device=self.device)
             hidden_pos[:, 2] = -10
-            all_hidable_obstacles = (
-                self.harder_transfer_obstacles
-                + self.harder_table_obstacles
-                + list(self.harder_overhead_obstacles.values())
-            )
+            all_hidable_obstacles = self.harder_transfer_obstacles + self.harder_table_obstacles
             for obstacle in all_hidable_obstacles:
                 obstacle.set_pose(Pose.create_from_pq(hidden_pos))
 
@@ -441,12 +410,8 @@ class MakeIcedCoffeeEnv(BaseEnv):
                 )
                 use_table = torch.rand((b), device=self.device) < 0.8
                 table_count = torch.randint(1, 4, (b,), device=self.device)
-                use_overhead_dish = torch.rand((b), device=self.device) < 0.45
-                use_overhead_cup = torch.rand((b), device=self.device) < 0.45
 
-                any_active = (
-                    use_transfer | use_table | use_overhead_dish | use_overhead_cup
-                )
+                any_active = use_transfer | use_table
                 force_transfer = ~any_active
                 use_transfer = use_transfer | force_transfer
                 transfer_count = torch.where(
@@ -470,10 +435,10 @@ class MakeIcedCoffeeEnv(BaseEnv):
                 transfer0_center[:, 0] = torch.clamp(transfer0_center[:, 0], min=0.07, max=0.26)
                 transfer0_active = use_transfer & (transfer_count >= 1)
                 transfer0_yaw = path_yaw + (torch.rand((b), device=self.device) - 0.5) * 0.18
-                self._set_box_obstacle_pose(
+                self._set_ycb_obstacle_pose(
                     self.harder_transfer_obstacles[0],
+                    self.harder_transfer_obstacle_model_ids[0],
                     transfer0_center,
-                    self.harder_transfer_half_size,
                     transfer0_yaw,
                     transfer0_active,
                     hidden_pos,
@@ -488,10 +453,10 @@ class MakeIcedCoffeeEnv(BaseEnv):
                 transfer1_center[:, 0] = torch.clamp(transfer1_center[:, 0], min=0.07, max=0.26)
                 transfer1_active = use_transfer & (transfer_count >= 2)
                 transfer1_yaw = path_yaw + (torch.rand((b), device=self.device) - 0.5) * 0.18
-                self._set_box_obstacle_pose(
+                self._set_ycb_obstacle_pose(
                     self.harder_transfer_obstacles[1],
+                    self.harder_transfer_obstacle_model_ids[1],
                     transfer1_center,
-                    self.harder_transfer_half_size,
                     transfer1_yaw,
                     transfer1_active,
                     hidden_pos,
@@ -520,44 +485,6 @@ class MakeIcedCoffeeEnv(BaseEnv):
                     identity_q[:, 0] = 1.0
                     obs_q = torch.where(active_mask[:, None], obs_q, identity_q)
                     obstacle.set_pose(Pose.create_from_pq(obs_pos, obs_q))
-
-                overhead_center_z = self.overhead_bottom_z + self.overhead_half_size[2]
-
-                dish_overhead_center = dish_base_pos[:, :2]
-                dish_overhead_center += path_dir * (
-                    0.05 + (torch.rand((b), device=self.device) - 0.5) * 0.02
-                )[:, None]
-                dish_overhead_center += perp_dir * (
-                    (torch.rand((b), device=self.device) - 0.5) * 0.06
-                )[:, None]
-                dish_overhead_yaw = path_yaw + (torch.rand((b), device=self.device) - 0.5) * 0.3
-                self._set_box_obstacle_pose(
-                    self.harder_overhead_obstacles["dish"],
-                    dish_overhead_center,
-                    self.overhead_half_size,
-                    dish_overhead_yaw,
-                    use_overhead_dish,
-                    hidden_pos,
-                    center_z=overhead_center_z,
-                )
-
-                cup_overhead_center = cup_base_pos[:, :2]
-                cup_overhead_center += path_dir * (
-                    -0.05 + (torch.rand((b), device=self.device) - 0.5) * 0.02
-                )[:, None]
-                cup_overhead_center += perp_dir * (
-                    (torch.rand((b), device=self.device) - 0.5) * 0.06
-                )[:, None]
-                cup_overhead_yaw = path_yaw + (torch.rand((b), device=self.device) - 0.5) * 0.3
-                self._set_box_obstacle_pose(
-                    self.harder_overhead_obstacles["cup"],
-                    cup_overhead_center,
-                    self.overhead_half_size,
-                    cup_overhead_yaw,
-                    use_overhead_cup,
-                    hidden_pos,
-                    center_z=overhead_center_z,
-                )
             else:
                 # Default mode has no additional obstacles.
                 pass
@@ -577,27 +504,15 @@ class MakeIcedCoffeeEnv(BaseEnv):
         if not self.harder:
             return []
         obstacles_info = []
-        for actor in self.harder_transfer_obstacles:
+        for i, actor in enumerate(self.harder_transfer_obstacles):
             raw_pose = actor.pose.raw_pose
+            model_id = self.harder_transfer_obstacle_model_ids[i]
             obstacles_info.append(
                 dict(
                     center=raw_pose[:, :3],
                     quat=raw_pose[:, 3:],
                     extent=torch.tensor(
-                        self.harder_transfer_half_size,
-                        dtype=torch.float32,
-                        device=raw_pose.device,
-                    ).expand(raw_pose.shape[0], 3),
-                )
-            )
-        for actor in self.harder_overhead_obstacles.values():
-            raw_pose = actor.pose.raw_pose
-            obstacles_info.append(
-                dict(
-                    center=raw_pose[:, :3],
-                    quat=raw_pose[:, 3:],
-                    extent=torch.tensor(
-                        self.overhead_half_size,
+                        self._model_meta[model_id]["half_extents"],
                         dtype=torch.float32,
                         device=raw_pose.device,
                     ).expand(raw_pose.shape[0], 3),

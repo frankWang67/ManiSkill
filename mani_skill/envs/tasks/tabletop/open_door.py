@@ -46,7 +46,8 @@ class OpenDoorEnv(BaseEnv):
 
     **Difficulty Levels:**
     - default: only the cabinet door articulation.
-    - harder: two extra kinematic walls are added to block direct approach paths.
+    - harder: one horizontal kinematic platform is placed between the robot and
+      the door handle to block direct opening trajectories.
 
     **Success Condition:**
     - door revolute joint angle exceeds a task threshold.
@@ -128,8 +129,7 @@ class OpenDoorEnv(BaseEnv):
     def _build_obstacles(self):
         wall_mat = create_colored_material([0.85, 0.15, 0.15, 1.0])
         self.obstacle_half_sizes = [
-            [0.03, 0.28, 0.14],
-            [0.18, 0.03, 0.14],
+            [0.12, 0.14, 0.02],
         ]
         self.obstacles = []
         for i, hs in enumerate(self.obstacle_half_sizes):
@@ -296,18 +296,17 @@ class OpenDoorEnv(BaseEnv):
             hidden = torch.zeros((b, 3), device=self.device)
             hidden[:, 2] = -10
             if self.harder:
-                wall1 = torch.zeros((b, 3), device=self.device)
-                wall1[:, 0] = p[:, 0] - 0.18
-                wall1[:, 1] = p[:, 1] + 0.03
-                wall1[:, 2] = 0.14
+                self._update_task_kinematics()
+                handle = self.handle_pos[env_idx]
+                robot_pos = self.agent.robot.pose.p[env_idx]
 
-                wall2 = torch.zeros((b, 3), device=self.device)
-                wall2[:, 0] = p[:, 0] - 0.03
-                wall2[:, 1] = p[:, 1] - 0.26
-                wall2[:, 2] = 0.14
+                # Place a horizontal platform on the straight robot->handle corridor.
+                wall_center = robot_pos * 0.60 + handle * 0.40
+                wall_center[:, 2] = handle[:, 2] - 0.05
 
-                self.obstacles[0].set_pose(Pose.create_from_pq(wall1))
-                self.obstacles[1].set_pose(Pose.create_from_pq(wall2))
+                wall_q = torch.zeros((b, 4), device=self.device, dtype=torch.float32)
+                wall_q[:, 0] = 1.0
+                self.obstacles[0].set_pose(Pose.create_from_pq(wall_center, wall_q))
             else:
                 for obs in self.obstacles:
                     obs.set_pose(Pose.create_from_pq(hidden))

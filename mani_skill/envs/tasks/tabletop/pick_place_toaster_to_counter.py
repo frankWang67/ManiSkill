@@ -593,20 +593,37 @@ class PickPlaceToasterToCounterEnv(BaseEnv):
                 path_xy = plate_base_pos[:, :2] - toaster_base_pos[:, :2]
                 path_norm = torch.linalg.norm(path_xy, axis=1, keepdims=True).clamp(min=1e-6)
                 path_dir = path_xy / path_norm
-                perp_dir = torch.stack([-path_dir[:, 1], path_dir[:, 0]], dim=1)
-                fractions = [0.45, 0.68, 0.86]
-                lateral_offsets = [0.02, 0.06, -0.05]
+                plate_side_dir = torch.stack([-path_dir[:, 1], path_dir[:, 0]], dim=1)
+                blocked_side_sign = torch.where(
+                    torch.rand((b), device=self.device) < 0.5,
+                    torch.ones((b), device=self.device),
+                    -torch.ones((b), device=self.device),
+                )
+                blocked_side_offset = blocked_side_sign * (
+                    0.20 + (torch.rand((b), device=self.device) - 0.5) * 0.02
+                )
+                side_center = (
+                    plate_base_pos[:, :2] + plate_side_dir * blocked_side_offset[:, None]
+                )
+                longitudinal_offsets = torch.linspace(
+                    -0.10,
+                    0.10,
+                    steps=len(self.harder_obstacles),
+                    device=self.device,
+                    dtype=torch.float32,
+                )
                 for i, obstacle in enumerate(self.harder_obstacles):
                     posed = hidden_pos.clone()
-                    posed[:, :2] = toaster_base_pos[:, :2] + path_xy * (
-                        fractions[i] + (torch.rand((b), device=self.device) - 0.5) * 0.08
+                    side_jitter = (torch.rand((b), device=self.device) - 0.5) * 0.01
+                    posed[:, :2] = side_center + path_dir * (
+                        longitudinal_offsets[i]
+                        + (torch.rand((b), device=self.device) - 0.5) * 0.02
                     )[:, None]
-                    posed[:, :2] += perp_dir * (
-                        lateral_offsets[i]
-                        + (torch.rand((b), device=self.device) - 0.5) * 0.03
+                    posed[:, :2] += plate_side_dir * (
+                        blocked_side_sign * side_jitter
                     )[:, None]
-                    posed[:, 0] = torch.clamp(posed[:, 0], min=0.02, max=0.20)
-                    posed[:, 1] = torch.clamp(posed[:, 1], min=-0.28, max=0.05)
+                    posed[:, 0] = torch.clamp(posed[:, 0], min=-0.32, max=0.02)
+                    posed[:, 1] = torch.clamp(posed[:, 1], min=-0.28, max=0.18)
                     model_id = self.harder_obstacle_model_ids[i]
                     posed[:, 2] = self._model_meta[model_id]["bottom_z"]
                     obs_q = randomization.random_quaternions(
