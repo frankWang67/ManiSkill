@@ -133,8 +133,17 @@ def download(
     base_filename = data_source.filename
     if base_filename is None:
         base_filename = data_source.url.split("/")[-1]
+    should_extract_zip = (
+        data_source.url.endswith(".zip")
+        or (base_filename is not None and str(base_filename).endswith(".zip"))
+        or zipfile.is_zipfile(tmp_filename)
+    )
     # Extract or move to output path
-    if data_source.url.endswith(".zip"):
+    if should_extract_zip:
+        if not zipfile.is_zipfile(tmp_filename):
+            raise IOError(
+                f"Expected a zip archive for {data_source.url}, but downloaded file is not a zip."
+            )
         with zipfile.ZipFile(tmp_filename, "r") as zip_ref:
             if verbose:
                 for file in tqdm(zip_ref.infolist()):

@@ -70,6 +70,12 @@ def initialize_data_sources():
         target_path="tasks/bridge_v2_real2sim_dataset",
         checksum="618512a205b4528cafecdad14b1788ed1130879f3064deb406516ed5b9c5ba92",
     )
+    DATA_SOURCES["hang_mug_assets"] = DataSource(
+        source_type="task_assets",
+        url="https://cloud.tsinghua.edu.cn/f/6ebfc230fe4040c5887b/?dl=1",
+        target_path="tasks/hang_mug",
+        filename="hang_mug_assets.zip",
+    )
 
     # ---------------------------------------------------------------------------- #
     # PartNet-mobility

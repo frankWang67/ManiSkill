@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -27,7 +28,9 @@ from mani_skill.utils.structs import Pose
 from mani_skill.utils.structs.types import Array
 
 
-@register_env("HangMug-v1", max_episode_steps=120, asset_download_ids=["ycb"])
+@register_env(
+    "HangMug-v1", max_episode_steps=120, asset_download_ids=["ycb", "hang_mug_assets"]
+)
 class HangMugEnv(BaseEnv):
     SUPPORTED_ROBOTS = [
         "panda_robotiq_wristcam",
@@ -67,7 +70,10 @@ class HangMugEnv(BaseEnv):
     ):
         self.robot_init_qpos_noise = robot_init_qpos_noise
         self.harder = harder
-        self._rt_objects_root = Path("/home/wshf/RoboTwin/assets/objects")
+        default_hang_mug_root = ASSET_DIR / "tasks" / "hang_mug"
+        self._hang_mug_assets_root = Path(
+            os.getenv("MS_HANG_MUG_ASSET_DIR", str(default_hang_mug_root))
+        )
         self._mug_model_id = 0
         ycb_meta = load_json(ASSET_DIR / "assets/mani_skill2_ycb/info_pick_v0.json")
         self._harder_obstacle_meta = {}
@@ -105,11 +111,25 @@ class HangMugEnv(BaseEnv):
         super()._load_agent(options, sapien.Pose(p=[-0.522, 0, 0]))
 
     def _asset_paths(self, modelname: str, model_id: int):
-        model_dir = self._rt_objects_root / modelname
-        if not model_dir.exists():
+        root = self._hang_mug_assets_root
+        # Support both common layouts:
+        # 1) <root>/039_mug/... (default downloader extraction target)
+        # 2) <root>/hang_mug/039_mug/... (if user points to parent dir)
+        # 3) <root>/assets/objects/039_mug/... (direct RoboTwin objects root)
+        candidates = [root, root / "hang_mug", root / "assets" / "objects"]
+        model_dir = None
+        for candidate in candidates:
+            maybe = candidate / modelname
+            if maybe.exists():
+                model_dir = maybe
+                break
+        if model_dir is None:
+            expected = "\n".join([f"- {str(c / modelname)}" for c in candidates])
             raise FileNotFoundError(
-                f"RoboTwin object assets not found: {model_dir}. "
-                "Please extract from /home/wshf/RoboTwin/assets/objects.zip."
+                "HangMug assets not found. Checked:\n"
+                f"{expected}\n"
+                "Download with `python -m mani_skill.utils.download_asset hang_mug_assets` "
+                "or set MS_HANG_MUG_ASSET_DIR to your local asset directory."
             )
         visual = model_dir / "visual" / f"base{model_id}.glb"
         collision = model_dir / "collision" / f"base{model_id}.glb"
@@ -117,7 +137,8 @@ class HangMugEnv(BaseEnv):
         if not visual.exists() or not collision.exists() or not meta.exists():
             raise FileNotFoundError(
                 f"Missing files for {modelname} model_id={model_id}: "
-                f"{visual}, {collision}, {meta}"
+                f"{visual}, {collision}, {meta}. "
+                "Expected layout under tasks/hang_mug/<model>/ (or equivalent override path)."
             )
         return visual, collision, meta
 
