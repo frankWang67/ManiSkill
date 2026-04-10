@@ -1,6 +1,5 @@
 import numpy as np
 import sapien
-import torch
 
 from mani_skill.examples.motionplanning.base_motionplanner.utils import (
     compute_grasp_info_by_obb,
@@ -25,8 +24,6 @@ OPEN_RELEASE_STEPS = 10
 POST_RELEASE_SETTLE_STEPS = 12
 RETURN_HOME_STEPS = 36
 FINAL_SETTLE_STEPS = 12
-MAX_ATTACH_POS_ERR = 0.12
-MAX_ATTACH_ROT_ERR = 3.2
 GRASP_VERIFY_STEPS = 6
 MAX_GRASP_VERIFY_POS_ERR = 0.08
 MAX_GRASP_VERIFY_DROP = 0.04
@@ -69,15 +66,6 @@ def _to_sapien_pose(pose):
     return pose
 
 
-def _quat_angle(q0, q1):
-    q0 = np.asarray(q0, dtype=np.float64)
-    q1 = np.asarray(q1, dtype=np.float64)
-    q0 = q0 / (np.linalg.norm(q0) + 1e-8)
-    q1 = q1 / (np.linalg.norm(q1) + 1e-8)
-    dot = np.clip(np.abs(np.dot(q0, q1)), 0.0, 1.0)
-    return 2.0 * np.arccos(dot)
-
-
 def _move(planner, pose: sapien.Pose, dry_run: bool = False):
     res = planner.move_to_pose_with_screw(pose, dry_run=dry_run)
     if res == -1:
@@ -95,48 +83,6 @@ def _step_with_qpos(planner, qpos: np.ndarray):
     if planner.vis:
         planner.base_env.render_human()
     return obs, reward, terminated, truncated, info
-
-
-def _set_mug_pose_static(env, mug_pose: sapien.Pose):
-    env.mug.set_pose(mug_pose)
-    env.mug.set_linear_velocity(torch.zeros_like(env.mug.get_linear_velocity()))
-    env.mug.set_angular_velocity(torch.zeros_like(env.mug.get_angular_velocity()))
-
-
-def _follow_path_with_attachment(planner, result, env, mug_in_tcp):
-    n_step = result["position"].shape[0]
-    if n_step == 0:
-        qpos = planner.robot.get_qpos()[0, : len(planner.planner.joint_vel_limits)].cpu().numpy()
-        obs, reward, terminated, truncated, info = _step_with_qpos(planner, qpos)
-        tcp_pose = _to_sapien_pose(env.agent.tcp_pose)
-        expected_mug_pose = tcp_pose * mug_in_tcp
-        current_mug_pose = _to_sapien_pose(env.mug.pose)
-        pos_err = np.linalg.norm(np.asarray(current_mug_pose.p) - np.asarray(expected_mug_pose.p))
-        rot_err = _quat_angle(current_mug_pose.q, expected_mug_pose.q)
-        if pos_err > MAX_ATTACH_POS_ERR or rot_err > MAX_ATTACH_ROT_ERR:
-            return -1
-        _set_mug_pose_static(env, expected_mug_pose)
-        return obs, reward, terminated, truncated, info
-
-    for i in range(n_step):
-        qpos = result["position"][i]
-        obs, reward, terminated, truncated, info = _step_with_qpos(planner, qpos)
-        tcp_pose = _to_sapien_pose(env.agent.tcp_pose)
-        expected_mug_pose = tcp_pose * mug_in_tcp
-        current_mug_pose = _to_sapien_pose(env.mug.pose)
-        pos_err = np.linalg.norm(np.asarray(current_mug_pose.p) - np.asarray(expected_mug_pose.p))
-        rot_err = _quat_angle(current_mug_pose.q, expected_mug_pose.q)
-        if pos_err > MAX_ATTACH_POS_ERR or rot_err > MAX_ATTACH_ROT_ERR:
-            return -1
-        _set_mug_pose_static(env, expected_mug_pose)
-    return obs, reward, terminated, truncated, info
-
-
-def _move_with_attachment(planner, env, pose: sapien.Pose, mug_in_tcp):
-    res = _move(planner, pose, dry_run=True)
-    if res == -1:
-        return -1
-    return _follow_path_with_attachment(planner, res, env, mug_in_tcp)
 
 
 def _move_to_qpos_linearly(planner, target_qpos: np.ndarray, steps: int):
@@ -285,9 +231,9 @@ def solve(env, seed=None, debug=False, vis=False):
             ),
             q=target_tcp_pose.q,
         )
-        if _move_with_attachment(planner, env, rotate_pose, mug_in_tcp) == -1:
+        if _move(planner, rotate_pose) == -1:
             return -1
-        if _move_with_attachment(planner, env, target_tcp_pose, mug_in_tcp) == -1:
+        if _move(planner, target_tcp_pose) == -1:
             return -1
 
         if not _verify_physical_grasp(planner, env, mug_in_tcp):
