@@ -186,10 +186,18 @@ def from_pd_joint_pos_to_ee(
             else:
                 # NOTE (stao): We convert from quaternion to matrix to euler angles since this is how the default pd ee pose controller does it
                 # As far as I know this is not notably any slower than a batched version of transforms3d euler2quat.
+
+                # For absolute EE pose control, convert world-frame target pose into
+                # the target controller articulation-root frame expected by
+                # PDEEPoseController(frame="root_translation:root_aligned_body_rotation").
+                
+                # ===== FIX THE FRAME INCONSISTENCY ISSUE =====
+                target_ee_pose_at_root = arm_controller.articulation.pose.inv() * target_ee_pose_pin
+                # =============================================
                 output_action_dict["arm"] = torch.cat(
                     [
                         common.to_tensor(
-                            target_ee_pose_pin.p[0], device=env.unwrapped.device
+                            target_ee_pose_at_root.p[0], device=env.unwrapped.device
                         ),
                         # ===== CHANGE FROM EULER ANGLES TO QUATERNION REPRESENTATION FOR ROTATION CONTROL =====
                         # common.to_tensor(
@@ -202,12 +210,14 @@ def from_pd_joint_pos_to_ee(
                         #     device=env.unwrapped.device,
                         # ),
                         common.to_tensor(
-                            target_ee_pose_pin.q[0], device=env.unwrapped.device
+                            target_ee_pose_at_root.q[0], device=env.unwrapped.device
                         ),
                         # ======================================================================================
                     ]
                 )
-                output_action_dict["arm"][:3] -= arm_controller.articulation.pose.p[0]
+                # ===== FIX THE FRAME INCONSISTENCY ISSUE =====
+                # output_action_dict["arm"][:3] -= arm_controller.articulation.pose.p[0]
+                # =============================================
                 output_action = controller.from_action_dict(output_action_dict)
 
             _, _, _, _, info = env.step(output_action)

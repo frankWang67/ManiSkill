@@ -275,5 +275,7 @@ def solve(env, seed=None, debug=False, vis=False):
         return -1
     quit_pos = np.array([-0.3, 0.0, 0.6], dtype=np.float64)
     quit_pose = sapien.Pose(p=quit_pos, q=home_pose.q)
-    _move(planner, quit_pose)
-    return open_res
+    quit_res = _move(planner, quit_pose)
+    if quit_res == -1:
+        return -1
+    return quit_res

@@ -166,21 +166,17 @@ def solve(env, seed=None, debug=False, vis=False):
         edge_shift = max(edge_half - EDGE_INSET, 0.0)
 
         robot_p = _first_np(env.agent.robot.pose.p)
-        primary_side_sign = 1.0 if np.dot(robot_p - grasp_center_base, closing) >= 0 else -1.0
+        primary_side_sign = (
+            1.0 if np.dot(robot_p - grasp_center_base, closing) >= 0 else -1.0
+        )
 
         planner.open_gripper(t=6)
-        grasp_ok = False
-        for side_sign in [primary_side_sign, -primary_side_sign]:
-            grasp_center = grasp_center_base + side_sign * closing * edge_shift
-            grasp_pose = env.agent.build_grasp_pose(approaching, closing, grasp_center)
-            pre_grasp_pose = grasp_pose * sapien.Pose([0.0, 0.0, -PRE_GRASP_DIST])
-            if _move(planner, pre_grasp_pose) == -1:
-                continue
-            if _move(planner, grasp_pose) == -1:
-                continue
-            grasp_ok = True
-            break
-        if not grasp_ok:
+        grasp_center = grasp_center_base + primary_side_sign * closing * edge_shift
+        grasp_pose = env.agent.build_grasp_pose(approaching, closing, grasp_center)
+        pre_grasp_pose = grasp_pose * sapien.Pose([0.0, 0.0, -PRE_GRASP_DIST])
+        if _move(planner, pre_grasp_pose) == -1:
+            return -1
+        if _move(planner, grasp_pose) == -1:
             return -1
 
         planner.close_gripper(t=14)
@@ -239,7 +235,7 @@ def solve(env, seed=None, debug=False, vis=False):
         if not _verify_physical_grasp(planner, env, mug_in_tcp):
             return -1
 
-        # Release is purely physical from here: no mug pose forcing.
+        # Release is purely physical from here.
         planner.open_gripper(t=OPEN_RELEASE_STEPS)
         _hold_current_qpos(planner, POST_RELEASE_SETTLE_STEPS)
 
