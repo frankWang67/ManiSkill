@@ -70,7 +70,7 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
 
     gripper_stiffness = 1e5
     gripper_damping = 2000
-    gripper_force_limit = 0.1
+    gripper_force_limit = 1
     gripper_friction = 1
 
     @property

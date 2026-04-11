@@ -18,8 +18,8 @@ PRE_GRASP_DIST = 0.10
 LIFT_EXTRA_Z = 0.16
 MIN_CRUISE_Z = 0.34
 MIN_LIFTED_DELTA_Z = 0.03
-RETREAT_BACKOFF = 0.06
-RETREAT_UP = 0.07
+RETREAT_BACKOFF = 0.10
+RETREAT_UP = -0.03
 OPEN_RELEASE_STEPS = 10
 POST_RELEASE_SETTLE_STEPS = 12
 RETURN_HOME_STEPS = 36
@@ -31,9 +31,9 @@ MAX_GRASP_VERIFY_DROP = 0.04
 # Stable hanger-relative mug pose estimate used to compute a placement TCP target.
 HANGER_TO_MUG_REL_POSE = np.array(
     [
-        [-0.96162, 0.15370, 0.22722, 0.06687-0.02],
-        [-0.14493, 0.41862, -0.89652, 0.11050],
-        [-0.23292, -0.89504, -0.38028, 0.04691-0.02],
+        [-0.61402, -0.10827, 0.78183, 0.10743],
+        [-0.76995, -0.13576, -0.62349, 0.16088],
+        [0.17365, -0.98481, 0.0, 0.07182],
         [0.0, 0.0, 0.0, 1.0],
     ],
     dtype=np.float64,
@@ -209,8 +209,11 @@ def solve(env, seed=None, debug=False, vis=False):
         hangers = env.hangers if hasattr(env, "hangers") else [env.hanger]
         target_branch_idx = int(rng.integers(0, len(hangers)))
 
-        hanger_tf = hangers[target_branch_idx].pose.to_transformation_matrix()[0].cpu().numpy()
-        target_mug_pose = sapien.Pose(hanger_tf @ HANGER_TO_MUG_REL_POSE)
+        target_mug_pose = env.get_hang_goal_pose(branch_idx=target_branch_idx)
+        target_mug_pose = sapien.Pose(
+            p=_first_np(target_mug_pose["mug_pos"]).astype(np.float32),
+            q=_first_np(target_mug_pose["mug_quat"]).astype(np.float32),
+        )
         target_tcp_pose = target_mug_pose * mug_to_tcp
 
         hang_pose = env.get_hang_pose_and_direction(branch_idx=target_branch_idx)
@@ -229,6 +232,9 @@ def solve(env, seed=None, debug=False, vis=False):
         )
         if _move(planner, rotate_pose) == -1:
             return -1
+        
+        mug_to_tcp = _to_sapien_pose(env.mug.pose.inv() * env.agent.tcp_pose)
+        target_tcp_pose = target_mug_pose * mug_to_tcp
         if _move(planner, target_tcp_pose) == -1:
             return -1
 
@@ -242,9 +248,14 @@ def solve(env, seed=None, debug=False, vis=False):
         # ------------------------------------------------------------------ #
         # 5) Return to initial pose
         # ------------------------------------------------------------------ #
+        retreat_dir = np.cross(branch_dir, np.array([0.0, 0.0, 1.0], dtype=np.float64))
+        retreat_dir[2] = 0.0
+        if np.linalg.norm(retreat_dir) < 1e-8:
+            retreat_dir = branch_dir
+        retreat_dir = _normalize(retreat_dir)
         retreat_pose = sapien.Pose(
             p=_to_sapien_pose(env.agent.tcp_pose).p
-            + branch_dir * RETREAT_BACKOFF
+            + retreat_dir * RETREAT_BACKOFF
             + np.array([0.0, 0.0, RETREAT_UP], dtype=np.float64),
             q=_to_sapien_pose(env.agent.tcp_pose).q,
         )

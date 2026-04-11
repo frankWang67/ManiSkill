@@ -68,21 +68,21 @@
     <parent link="root_arm_1_link_3"/>
     <child link="root_arm_1_link_4"/>
     <axis xyz="1 0 0"/>
-    <limit effort="100" lower="-3.15" upper="3.15" velocity="0.50"/>
+    <limit effort="100" lower="-20" upper="20" velocity="0.50"/>
     <dynamics damping="10.0" friction="10"/>
   </joint>
   <joint name="root_y_rot_joint" type="revolute">
     <parent link="root_arm_1_link_4"/>
     <child link="root_arm_1_link_5"/>
     <axis xyz="0 1 0"/>
-    <limit effort="100" lower="-3.15" upper="3.15" velocity="0.50"/>
+    <limit effort="100" lower="-20" upper="20" velocity="0.50"/>
     <dynamics damping="10.0" friction="10"/>
   </joint>
   <joint name="root_z_rot_joint" type="revolute">
     <parent link="root_arm_1_link_5"/>
     <child link="robotiq_arg2f_base_link"/>
     <axis xyz="0 0 1"/>
-    <limit effort="100" lower="-3.15" upper="3.15" velocity="0.50"/>
+    <limit effort="100" lower="-20" upper="20" velocity="0.50"/>
     <dynamics damping="10.0" friction="10"/>
   </joint>
   <link name="robotiq_arg2f_base_link">

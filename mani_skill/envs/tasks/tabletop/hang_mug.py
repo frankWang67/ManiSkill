@@ -304,7 +304,7 @@ class HangMugEnv(BaseEnv):
         self.goal_site = actors.build_sphere(
             self.scene,
             radius=0.01,
-            color=[0, 1, 0, 1],
+            color=[0, 1, 0, 0],
             name="goal_site",
             body_type="kinematic",
             add_collision=False,
@@ -732,6 +732,8 @@ class HangMugEnv(BaseEnv):
         handle_local = common.to_tensor(self.mug_handle_local_pos, device=self.device)
         handle_world_offset = mug_rot @ handle_local
         mug_p = target - handle_world_offset
+        # mug_p[2] += 0.01
+        mug_p += branch_axis * 0.01
 
         return {
             "mug_pos": mug_p,

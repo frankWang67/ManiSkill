@@ -73,7 +73,7 @@ class XArm7RobotiqWristCamera(BaseAgent):
 
         self.gripper_stiffness = 1e5
         self.gripper_damping = 2000
-        self.gripper_force_limit = 0.1
+        self.gripper_force_limit = 1
         self.gripper_friction = 1
         self.ee_link_name = "eef"
 
