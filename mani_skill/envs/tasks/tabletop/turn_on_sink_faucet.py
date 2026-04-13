@@ -92,21 +92,22 @@ class TurnOnSinkFaucetEnv(BaseEnv):
 
     @property
     def _default_sensor_configs(self):
-        base_pose = sapien_utils.look_at(
-            eye=[1.42, -1.65, 1.52], target=[1.24, -0.42, 0.96]
-        )
-        return [
-            *self.agent._sensor_configs,
-            CameraConfig(
-                "base_camera",
-                pose=base_pose,
-                width=128,
-                height=128,
-                fov=np.pi / 2,
-                near=0.01,
-                far=100,
-            ),
-        ]
+        # base_pose = sapien_utils.look_at(
+        #     eye=[1.42, -1.65, 1.52], target=[1.24, -0.42, 0.96]
+        # )
+        # return [
+        #     *self.agent._sensor_configs,
+        #     CameraConfig(
+        #         "base_camera",
+        #         pose=base_pose,
+        #         width=128,
+        #         height=128,
+        #         fov=np.pi / 2,
+        #         near=0.01,
+        #         far=100,
+        #     ),
+        # ]
+        return self.agent._sensor_configs
 
     @property
     def _default_human_render_camera_configs(self):
@@ -393,8 +394,11 @@ class TurnOnSinkFaucetEnv(BaseEnv):
         }
 
     def _get_obs_extra(self, info: dict):
+        tcp_pose_world_frame = self.agent.tcp_pose
+        tcp_pose_root_frame = self.agent.robot.get_pose().inv() * tcp_pose_world_frame
         obs = dict(
-            tcp_pose=self.agent.tcp.pose.raw_pose,
+            tcp_pose=tcp_pose_root_frame.raw_pose,
+            tcp_pose_world_frame=tcp_pose_world_frame.raw_pose,
             faucet_joint_pos=info["faucet_joint_pos"],
             target_on_angle=info["target_on_angle"],
             handle_pos=info["handle_pos"],

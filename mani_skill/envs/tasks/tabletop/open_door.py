@@ -368,8 +368,11 @@ class OpenDoorEnv(BaseEnv):
         }
 
     def _get_obs_extra(self, info: dict):
+        tcp_pose_world_frame = self.agent.tcp_pose
+        tcp_pose_root_frame = self.agent.robot.get_pose().inv() * tcp_pose_world_frame
         obs = dict(
-            tcp_pose=self.agent.tcp.pose.raw_pose,
+            tcp_pose=tcp_pose_root_frame.raw_pose,
+            tcp_pose_world_frame=tcp_pose_world_frame.raw_pose,
             door_joint_pos=info["door_joint_pos"],
             target_open_angle=info["target_open_angle"],
             handle_pos=info["handle_pos"],

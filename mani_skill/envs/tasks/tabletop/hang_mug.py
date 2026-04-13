@@ -656,8 +656,11 @@ class HangMugEnv(BaseEnv):
         }
 
     def _get_obs_extra(self, info: dict):
+        tcp_pose_world_frame = self.agent.tcp_pose
+        tcp_pose_root_frame = self.agent.robot.get_pose().inv() * tcp_pose_world_frame
         obs = dict(
-            tcp_pose=self.agent.tcp.pose.raw_pose,
+            tcp_pose=tcp_pose_root_frame.raw_pose,
+            tcp_pose_world_frame=tcp_pose_world_frame.raw_pose,
             mug_handle_pos=info["mug_handle_pos"],
             blocked_branch=info["blocked_branch"],
             goal_branch=info["goal_branch"],

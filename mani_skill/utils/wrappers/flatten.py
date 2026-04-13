@@ -45,10 +45,9 @@ class FlattenRGBDObservationWrapper(gym.ObservationWrapper):
         joint_state = observation.pop("agent")
         sensor_data = observation.pop("sensor_data")
         del observation["sensor_param"]
-        if "is_grasped" in observation["extra"]:
-            del observation["extra"]["is_grasped"]
-        if "goal_pos" in observation["extra"]:
-            del observation["extra"]["goal_pos"]
+        for key in list(observation["extra"].keys()):
+            if key != "tcp_pose":
+                del observation["extra"][key]
         rgb_images = []
         depth_images = []
         for cam_data in sensor_data.values():
