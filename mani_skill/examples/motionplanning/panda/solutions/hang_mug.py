@@ -122,6 +122,53 @@ def _verify_physical_grasp(
     return (pos_err <= max_pos_err) and (z_drop <= max_drop)
 
 
+def _select_closing_toward_handle(
+    env,
+    approaching: np.ndarray,
+    closing: np.ndarray,
+    grasp_center_base: np.ndarray,
+    edge_shift: float,
+):
+    handle_world = None
+    if hasattr(env, "_mug_handle_center_world"):
+        handle_world = _first_np(env._mug_handle_center_world())
+    elif hasattr(env, "mug_handle_local_pos"):
+        mug_pose = _to_sapien_pose(env.mug.pose)
+        handle_local = _first_np(env.mug_handle_local_pos)
+        handle_world = np.asarray((mug_pose * sapien.Pose(p=handle_local)).p, dtype=np.float64)
+    if handle_world is None:
+        return closing
+
+    camera_link = getattr(getattr(env.agent, "robot", None), "links_map", {}).get(
+        "camera_link", None
+    )
+    if camera_link is None:
+        return closing
+
+    tcp_pose_now = _to_sapien_pose(env.agent.tcp_pose)
+    cam_pose_now = _to_sapien_pose(camera_link.pose)
+    tcp_to_cam = _to_sapien_pose(tcp_pose_now.inv() * cam_pose_now)
+    robot_p = _first_np(env.agent.robot.pose.p)
+    mug_center = _first_np(env.mug.pose.p)
+    handle_vec = np.asarray(handle_world - mug_center, dtype=np.float64)
+    if np.linalg.norm(handle_vec) < 1e-8:
+        return closing
+
+    def _camera_handle_score(closing_dir: np.ndarray):
+        side_sign = 1.0 if np.dot(robot_p - grasp_center_base, closing_dir) >= 0 else -1.0
+        grasp_center = grasp_center_base + side_sign * closing_dir * edge_shift
+        grasp_pose = _to_sapien_pose(
+            env.agent.build_grasp_pose(approaching, closing_dir, grasp_center)
+        )
+        cam_pose = _to_sapien_pose(grasp_pose * tcp_to_cam)
+        cam_vec = _first_np(cam_pose.p) - mug_center
+        return float(np.dot(cam_vec, handle_vec))
+
+    pos_score = _camera_handle_score(closing)
+    neg_score = _camera_handle_score(-closing)
+    return -closing if neg_score > pos_score else closing
+
+
 def solve(env, seed=None, debug=False, vis=False):
     env.reset(seed=seed)
     assert env.unwrapped.control_mode in ["pd_joint_pos", "pd_joint_pos_vel"]
@@ -164,6 +211,13 @@ def solve(env, seed=None, debug=False, vis=False):
         grasp_center_base = grasp_info["center"].copy()
         edge_half = grasp_info["extents"][1] * 0.5
         edge_shift = max(edge_half - EDGE_INSET, 0.0)
+        closing = _select_closing_toward_handle(
+            env,
+            approaching=approaching,
+            closing=closing,
+            grasp_center_base=grasp_center_base,
+            edge_shift=edge_shift,
+        )
 
         robot_p = _first_np(env.agent.robot.pose.p)
         primary_side_sign = (
