@@ -414,14 +414,14 @@ class HangMugEnv(BaseEnv):
             # Mug spawn (RoboTwin-style ranges).
             mug_xyz = torch.zeros((b, 3), device=self.device)
             mug_xyz[:, 0] = torch.rand((b), device=self.device) * 0.10 - 0.20
-            mug_xyz[:, 1] = torch.rand((b), device=self.device) * 0.10 - 0.05
+            mug_xyz[:, 1] = torch.rand((b), device=self.device) * 0.06 - 0.03
             # mug_xyz[:, 2] = self.mug_bottom_to_com + 0.001
 
             mug_base_q = common.to_tensor(
                 np.tile(self.mug_base_quat[None, :], (b, 1)), device=self.device
             )
             euler = torch.zeros((b, 3), device=self.device)
-            euler[:, 1] = torch.rand((b), device=self.device) * 3.14 - 1.57
+            euler[:, 1] = torch.rand((b), device=self.device) * torch.pi / 2 - torch.pi * 3 / 4
             delta_q = rotation_conversions.matrix_to_quaternion(
                 rotation_conversions.euler_angles_to_matrix(euler, "XYZ")
             )
