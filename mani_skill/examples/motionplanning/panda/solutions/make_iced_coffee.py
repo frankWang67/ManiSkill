@@ -23,6 +23,7 @@ DETOUR_XY_NOISE = 0.015
 CRUISE_EXTRA_Z_RANGE = (0.03, 0.08)
 DETOUR_PROB = 0.85
 RETREAT_DETOUR_PROB = 0.5
+GRASP_CLOSING_YAW_JITTER_RANGE = (-0.35, 0.35)
 
 def _move(planner: PandaArmMotionPlanningSolver, pose: sapien.Pose):
     res = planner.move_to_pose_with_screw(pose)
@@ -59,13 +60,25 @@ def solve(env: MakeIcedCoffeeEnv, seed=None, debug: bool = False, vis: bool = Fa
     home_pose = env.agent.tcp.pose.sp
 
     approaching = np.array([0.0, 0.0, -1.0], dtype=np.float64)
-    base_target_closing = (
+    tcp_closing = (
         env.agent.tcp.pose.to_transformation_matrix()[0, :3, 1].cpu().numpy()
     ).astype(np.float64)
-    if rng.random() < 0.5:
-        base_target_closing *= -1.0
-    target_closing = base_target_closing.copy()
-    target_closing[:2] += rng.uniform(-0.2, 0.2, size=2)
+    # Keep the grasp closing direction close to the current TCP closing
+    # direction to avoid unnecessary 180-degree wrist flips, while still
+    # allowing a small planar yaw adjustment to improve grasp robustness.
+    target_closing = tcp_closing.copy()
+    target_closing[2] = 0.0
+    grasp_closing_yaw_jitter = float(rng.uniform(*GRASP_CLOSING_YAW_JITTER_RANGE))
+    if abs(grasp_closing_yaw_jitter) > 1e-8:
+        c = np.cos(grasp_closing_yaw_jitter)
+        s = np.sin(grasp_closing_yaw_jitter)
+        target_closing[:2] = np.array(
+            [
+                c * target_closing[0] - s * target_closing[1],
+                s * target_closing[0] + c * target_closing[1],
+            ],
+            dtype=np.float64,
+        )
     target_closing_norm = np.linalg.norm(target_closing)
     if target_closing_norm < 1e-8:
         target_closing = np.array([0.0, 1.0, 0.0], dtype=np.float64)

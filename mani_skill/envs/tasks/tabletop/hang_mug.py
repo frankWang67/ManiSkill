@@ -57,6 +57,7 @@ class HangMugEnv(BaseEnv):
     hang_success_position_tolerance = 0.075
     hang_elevation_tolerance = 0.06
     success_settle_steps = 12
+    left_branch_idx = 0
 
     def __init__(
         self,
@@ -729,7 +730,20 @@ class HangMugEnv(BaseEnv):
         branch_axis = branch_axis[idx, branch]
         hanger_rot = self.hangers[branch].pose.to_transformation_matrix()[idx, :3, :3]
         rack_fun_rot = hanger_rot @ self.rack_function_local_rot.to(self.device)
-        mug_rot = rack_fun_rot @ self.mug_handle_local_rot.to(self.device).transpose(0, 1)
+        mug_fun_align = torch.eye(3, dtype=torch.float32, device=self.device)
+        if branch == self.left_branch_idx:
+            # Mirror the hanging side for the left rack by rotating 180 degrees
+            # around the handle/branch functional axis.
+            mug_fun_align = torch.tensor(
+                [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]],
+                dtype=torch.float32,
+                device=self.device,
+            )
+        mug_rot = (
+            rack_fun_rot
+            @ mug_fun_align
+            @ self.mug_handle_local_rot.to(self.device).transpose(0, 1)
+        )
         mug_q = rotation_conversions.matrix_to_quaternion(mug_rot[None, :, :])[0]
 
         handle_local = common.to_tensor(self.mug_handle_local_pos, device=self.device)
