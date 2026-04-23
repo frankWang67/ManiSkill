@@ -341,8 +341,9 @@ class OpenDoorEnv(BaseEnv):
         obstacles_info = []
         if not self.harder:
             return obstacles_info
+        robot_root_inv = self.agent.robot.get_pose().inv()
         for i, part in enumerate(self.obstacles):
-            raw_pose = part.pose.raw_pose
+            raw_pose = (robot_root_inv * part.pose).raw_pose
             obs_info = {
                 "center": raw_pose[:, :3],
                 "quat": raw_pose[:, 3:],

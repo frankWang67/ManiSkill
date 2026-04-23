@@ -764,12 +764,13 @@ class HangMugEnv(BaseEnv):
     def get_obstacles_info(self):
         if not self.harder:
             return []
+        robot_root_inv = self.agent.robot.get_pose().inv()
         out = []
         for actor, model_id in [
             (self.branch_blocker, self.harder_obstacle_model_ids[0]),
             (self.blocker_bottle, self.harder_obstacle_model_ids[1]),
         ]:
-            raw_pose = actor.pose.raw_pose
+            raw_pose = (robot_root_inv * actor.pose).raw_pose
             half_extents = self._harder_obstacle_meta[model_id]["half_extents"]
             out.append(
                 {

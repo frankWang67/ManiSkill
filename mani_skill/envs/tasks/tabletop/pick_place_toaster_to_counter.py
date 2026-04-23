@@ -653,23 +653,24 @@ class PickPlaceToasterToCounterEnv(BaseEnv):
         }
 
     def get_obstacles_info(self):
+        robot_root_inv = self.agent.robot.get_pose().inv()
         obstacles_info = []
-        for actor, half_extent in zip(
-            self.toaster_obstacles, self.toaster_obstacle_half_sizes
-        ):
-            raw_pose = actor.pose.raw_pose
-            obstacles_info.append(
-                dict(
-                    center=raw_pose[:, :3],
-                    quat=raw_pose[:, 3:],
-                    extent=torch.tensor(
-                        half_extent, dtype=torch.float32, device=raw_pose.device
-                    ).expand(raw_pose.shape[0], 3),
-                )
-            )
+        # for actor, half_extent in zip(
+        #     self.toaster_obstacles, self.toaster_obstacle_half_sizes
+        # ):
+        #     raw_pose = (robot_root_inv * actor.pose).raw_pose
+        #     obstacles_info.append(
+        #         dict(
+        #             center=raw_pose[:, :3],
+        #             quat=raw_pose[:, 3:],
+        #             extent=torch.tensor(
+        #                 half_extent, dtype=torch.float32, device=raw_pose.device
+        #             ).expand(raw_pose.shape[0], 3),
+        #         )
+        #     )
         if self.harder:
             for i, actor in enumerate(self.harder_obstacles):
-                raw_pose = actor.pose.raw_pose
+                raw_pose = (robot_root_inv * actor.pose).raw_pose
                 obstacles_info.append(
                     dict(
                         center=raw_pose[:, :3],

@@ -361,8 +361,9 @@ class TurnOnSinkFaucetEnv(BaseEnv):
     def get_obstacles_info(self):
         obstacles_info = []
         if self.harder:
+            robot_root_inv = self.agent.robot.get_pose().inv()
             for i, actor in enumerate(self.extra_obstacles):
-                raw_pose = actor.pose.raw_pose
+                raw_pose = (robot_root_inv * actor.pose).raw_pose
                 extent = self.extra_obstacle_half_sizes[i]
                 if extent is None:
                     continue

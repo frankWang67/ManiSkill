@@ -503,9 +503,10 @@ class MakeIcedCoffeeEnv(BaseEnv):
     def get_obstacles_info(self):
         if not self.harder:
             return []
+        robot_root_inv = self.agent.robot.get_pose().inv()
         obstacles_info = []
         for i, actor in enumerate(self.harder_transfer_obstacles):
-            raw_pose = actor.pose.raw_pose
+            raw_pose = (robot_root_inv * actor.pose).raw_pose
             model_id = self.harder_transfer_obstacle_model_ids[i]
             obstacles_info.append(
                 dict(
@@ -519,7 +520,7 @@ class MakeIcedCoffeeEnv(BaseEnv):
                 )
             )
         for i, actor in enumerate(self.harder_table_obstacles):
-            raw_pose = actor.pose.raw_pose
+            raw_pose = (robot_root_inv * actor.pose).raw_pose
             half_extents = self._model_meta[self.harder_table_obstacle_model_ids[i]][
                 "half_extents"
             ]
