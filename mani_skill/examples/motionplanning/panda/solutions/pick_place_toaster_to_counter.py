@@ -6,7 +6,7 @@ from mani_skill.examples.motionplanning.panda.motionplanner import (
     PandaArmMotionPlanningSolver,
 )
 
-ROTATE_25_DEG = -25 * np.pi / 180.0
+ROTATE_25_DEG = -35 * np.pi / 180.0
 
 def _move(planner: PandaArmMotionPlanningSolver, pose: sapien.Pose):
     res = planner.move_to_pose_with_screw(pose)
@@ -52,7 +52,7 @@ def solve(
     side_sign = 1.0 if rng.random() < 0.5 else -1.0  # +y: left, -y: right
 
     grasp_approaching = np.array([0.0, 0.0, -1.0], dtype=np.float64)
-    grasp_closing = np.array([-side_sign, 0.0, 0.0], dtype=np.float64)
+    grasp_closing = np.array([-1.0, 0.0, 0.0], dtype=np.float64)
     grasp_closing /= np.linalg.norm(grasp_closing)
     grasp_pose = env.agent.build_grasp_pose(grasp_approaching, grasp_closing, grasp_center)
 
