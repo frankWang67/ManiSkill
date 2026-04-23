@@ -13,6 +13,12 @@ PRE_GRASP_LIFT = 0.02
 HANDLE_SHAFT_HEIGHT = 0.02
 ARC_STEPS = 10
 RETURN_HOME_STEPS = 30
+DETOUR_PROB = 0.85
+DETOUR_ATTEMPTS = 6
+DETOUR_BACKOFF_RANGE = (0.03, 0.07)
+DETOUR_WORLD_X_RANGE = (-0.05, 0.25)
+DETOUR_WORLD_Y_RANGE = (-0.15, 0.15)
+DETOUR_LIFT_RANGE = (0.01, 0.04)
 
 
 def _first_batch_np(x):
@@ -47,11 +53,46 @@ def _rotate_about_axis(vec, axis, angle):
     )
 
 
+def _sample_uniform(rng, low, high):
+    return float(rng.uniform(low, high))
+
+
 def _move(planner, pose: sapien.Pose, dry_run: bool = False):
     res = planner.move_to_pose_with_screw(pose, dry_run=dry_run)
     if res == -1:
         res = planner.move_to_pose_with_RRTConnect(pose, dry_run=dry_run)
     return res
+
+
+def _sample_detour_pose(turn_plan, rng):
+    approaching = _normalize(turn_plan["approaching"])
+
+    detour_center = (
+        np.asarray(turn_plan["pre_grasp_pose"].p, dtype=np.float64)
+        - approaching * _sample_uniform(rng, *DETOUR_BACKOFF_RANGE)
+        + np.array(
+            [
+                _sample_uniform(rng, *DETOUR_WORLD_X_RANGE),
+                _sample_uniform(rng, *DETOUR_WORLD_Y_RANGE),
+                _sample_uniform(rng, *DETOUR_LIFT_RANGE),
+            ],
+            dtype=np.float64,
+        )
+    )
+    return sapien.Pose(p=detour_center, q=turn_plan["grasp_pose"].q)
+
+
+def _move_to_faucet_with_detour(planner, turn_plan, rng):
+    if _sample_uniform(rng, 0.0, 1.0) < DETOUR_PROB:
+        for _ in range(DETOUR_ATTEMPTS):
+            detour_pose = _sample_detour_pose(turn_plan, rng)
+            if _move(planner, detour_pose, dry_run=True) == -1:
+                continue
+            if _move(planner, detour_pose) != -1:
+                break
+    if _move(planner, turn_plan["pre_grasp_pose"]) == -1:
+        return -1
+    return _move(planner, turn_plan["grasp_pose"])
 
 
 def _step_with_qpos(planner, qpos: np.ndarray):
@@ -159,6 +200,9 @@ def solve(env, seed=None, debug=False, vis=False):
     env = env.unwrapped
 
     try:
+        rng = getattr(env, "_episode_rng", None)
+        if rng is None:
+            rng = np.random.default_rng(seed)
         _auto_configure_gripper_targets(env, planner)
         dof = len(planner.planner.joint_vel_limits)
         home_qpos = env.agent.robot.get_qpos()[0, :dof].cpu().numpy()
@@ -167,9 +211,7 @@ def solve(env, seed=None, debug=False, vis=False):
 
         if planner.close_gripper(t=8) == -1:
             return -1
-        if _move(planner, turn_plan["pre_grasp_pose"]) == -1:
-            return -1
-        if _move(planner, turn_plan["grasp_pose"]) == -1:
+        if _move_to_faucet_with_detour(planner, turn_plan, rng) == -1:
             return -1
 
         res = _turn_faucet(env, planner, turn_plan)
