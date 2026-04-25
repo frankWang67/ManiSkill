@@ -118,7 +118,7 @@ class TurnOnSinkFaucetEnv(BaseEnv):
             eye=[2.06, -0.50, 1.20], target=[1.24, -0.42, 0.96]
         )
         # pose = sapien_utils.look_at(
-        #     eye=[1.06, -0.40, 1.20], target=[1.24, -0.22, 1.06]
+        #     eye=[0.66, -0.50, 1.20], target=[1.24, -0.42, 0.96]
         # )
         return CameraConfig(
             "render_camera", pose=pose, width=512, height=512, fov=1.0, near=0.01, far=100
@@ -181,7 +181,8 @@ class TurnOnSinkFaucetEnv(BaseEnv):
     def _build_harder_obstacles(self):
         self.extra_obstacles = []
         self.extra_obstacle_half_sizes = []
-        ycb_ids = ["006_mustard_bottle", "004_sugar_box"]
+        # ycb_ids = ["006_mustard_bottle", "004_sugar_box"]
+        ycb_ids = ["004_sugar_box"]
         for i, model_id in enumerate(ycb_ids):
             builder = actors.get_actor_builder(self.scene, id=f"ycb:{model_id}")
             builder.initial_pose = sapien.Pose(p=[0, 0, -10])
@@ -235,12 +236,15 @@ class TurnOnSinkFaucetEnv(BaseEnv):
     def _after_reconfigure(self, options):
         for i, actor in enumerate(self.extra_obstacles):
             collision_mesh = actor.get_first_collision_mesh()
-            if collision_mesh is None:
-                self.extra_obstacle_half_sizes[i] = [0.03, 0.03, 0.05]
-            else:
-                self.extra_obstacle_half_sizes[i] = (
-                    collision_mesh.bounding_box.extents / 2
-                ).tolist()
+            # if collision_mesh is None:
+            #     self.extra_obstacle_half_sizes[i] = [0.03, 0.03, 0.05]
+            # else:
+            #     self.extra_obstacle_half_sizes[i] = (
+            #         collision_mesh.bounding_box.extents / 2
+            #     ).tolist()
+            self.extra_obstacle_half_sizes[i] = (
+                collision_mesh.bounding_box.extents / 2
+            ).tolist()
 
     def target_handle_positions(self, env_idx: Optional[torch.Tensor] = None):
         if env_idx is None:
@@ -304,29 +308,29 @@ class TurnOnSinkFaucetEnv(BaseEnv):
                     local = torch.tensor(local_vec, dtype=torch.float32, device=self.device)
                     return torch.einsum("bij,j->bi", sink_rot_mats, local)
 
-                bottle_half = torch.tensor(
+                box_half = torch.tensor(
                     self.extra_obstacle_half_sizes[0], dtype=torch.float32, device=self.device
                 )
-                box_half = torch.tensor(
-                    self.extra_obstacle_half_sizes[1], dtype=torch.float32, device=self.device
-                )
-
-                bottle_p = torch.zeros((b, 3), dtype=torch.float32, device=self.device)
-                # Place on the left countertop side of the sink.
-                # bottle_p[:] = anchor_p + _offset([-0.08, 0.12, 0.0])
-                bottle_p[:] = anchor_p + _offset([-0.04, 0.25, 0.0]) + torch.rand(b, 3, device=self.device) * torch.tensor([-0.03, 0.0, 0.0], device=self.device)
-                bottle_p[:, 2] = anchor_p[:, 2] + bottle_half[2] + 0.01
+                # bottle_half = torch.tensor(
+                #     self.extra_obstacle_half_sizes[1], dtype=torch.float32, device=self.device
+                # )
 
                 box_p = torch.zeros((b, 3), dtype=torch.float32, device=self.device)
                 # Place close to the faucet to block direct approach trajectories.
                 # box_p[:] = anchor_p + _offset([-0.12, 0.18, 0.0])
-                box_p[:] = anchor_p + _offset([-0.20, -0.18, 0.0]) + torch.rand(b, 3, device=self.device) * torch.tensor([-0.05, 0.1, 0.0], device=self.device)
+                box_p[:] = anchor_p + _offset([-0.20, -0.24, 0.0]) + torch.rand(b, 3, device=self.device) * torch.tensor([-0.05, 0.1, 0.0], device=self.device)
                 box_p[:, 2] = anchor_p[:, 2] + box_half[2] + 0.01
 
-                bottle_q = anchor_q.clone()
+                # bottle_p = torch.zeros((b, 3), dtype=torch.float32, device=self.device)
+                # # Place on the left countertop side of the sink.
+                # # bottle_p[:] = anchor_p + _offset([-0.08, 0.12, 0.0])
+                # bottle_p[:] = anchor_p + _offset([-0.04, 0.25, 0.0]) + torch.rand(b, 3, device=self.device) * torch.tensor([-0.03, 0.0, 0.0], device=self.device)
+                # bottle_p[:, 2] = anchor_p[:, 2] + bottle_half[2] + 0.01
+
                 box_q = anchor_q.clone()
-                self.extra_obstacles[0].set_pose(Pose.create_from_pq(bottle_p, bottle_q))
-                self.extra_obstacles[1].set_pose(Pose.create_from_pq(box_p, box_q))
+                # bottle_q = anchor_q.clone()
+                self.extra_obstacles[0].set_pose(Pose.create_from_pq(box_p, box_q))
+                # self.extra_obstacles[1].set_pose(Pose.create_from_pq(bottle_p, bottle_q))
             else:
                 for actor in self.extra_obstacles:
                     actor.set_pose(Pose.create_from_pq(hidden))
