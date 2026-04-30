@@ -21,6 +21,64 @@ from mani_skill.utils.structs.link import Link
 from mani_skill.utils.structs.pose import Pose
 
 
+def _normalize_quat_tensor(quat: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    norm = torch.linalg.norm(quat, dim=-1, keepdim=True)
+    if torch.any(norm < eps):
+        raise RuntimeError(
+            f"Invalid near-zero quaternion produced during action conversion: {quat}"
+        )
+    return quat / norm.clamp_min(eps)
+
+
+def _assert_finite_tensor(name: str, value: torch.Tensor):
+    if not torch.all(torch.isfinite(value)):
+        raise RuntimeError(
+            f"Non-finite {name} produced during action conversion: {value}"
+        )
+
+
+def _get_realized_ee_pose_after_step(
+    ori_env: BaseEnv, arm_controller: Union[PDEEPoseController, PDEEPosController]
+) -> Pose:
+    if hasattr(ori_env.agent, "tcp_pose"):
+        return ori_env.agent.tcp_pose
+    if hasattr(ori_env.agent, "tcp") and hasattr(ori_env.agent.tcp, "pose"):
+        return ori_env.agent.tcp.pose
+    ori_link = ori_env.agent.robot.links_map.get(arm_controller.ee_link.name)
+    if ori_link is None:
+        raise RuntimeError(
+            f"Cannot find EE link {arm_controller.ee_link.name!r} in original robot."
+        )
+    return ori_link.pose
+
+
+def _get_controller_root_pose(
+    arm_controller: Union[PDEEPoseController, PDEEPosController]
+) -> Pose:
+    return arm_controller.root_link.pose
+
+
+def _target_pose_is_safe(
+    candidate_pose_at_root: Pose,
+    last_target_pos: Union[torch.Tensor, None],
+    max_step_delta: float = 0.20,
+) -> bool:
+    candidate_pos = candidate_pose_at_root.p[0]
+    candidate_quat = candidate_pose_at_root.q[0]
+    if not torch.all(torch.isfinite(candidate_pos)):
+        return False
+    if not torch.all(torch.isfinite(candidate_quat)):
+        return False
+    if torch.linalg.norm(candidate_quat) < 1e-8:
+        return False
+    if (
+        last_target_pos is not None
+        and torch.linalg.norm(candidate_pos - last_target_pos) > max_step_delta
+    ):
+        return False
+    return True
+
+
 def qpos_to_pd_joint_delta_pos(controller: PDJointPosController, qpos):
     assert type(controller) == PDJointPosController
     assert controller.config.use_delta
@@ -115,6 +173,7 @@ def from_pd_joint_pos_to_ee(
     use_target = arm_controller.config.use_target == True
     pin_model = ori_controller.articulation.create_pinocchio_model()
     info = {}
+    last_abs_target_pos = None
 
     for t in range(n):
         if pbar is not None:
@@ -129,18 +188,17 @@ def from_pd_joint_pos_to_ee(
         )  # do not in-place modify
         ori_env.step(ori_action)
 
-        # NOTE (stao): for high success rate of pd joint pos to pd ee delta pos/pose control, we need to use the current target qpos of the original
-        # environment controller to compute the target ee pose to try and reach. this is because if we attempt to reach the original envs ee link pose
-        # we may fall short and fail.
+        realized_ee_pose = _get_realized_ee_pose_after_step(ori_env, arm_controller)
         full_qpos = ori_controller.articulation.get_qpos()
         full_qpos[
             :, ori_arm_controller.active_joint_indices
         ] = ori_arm_controller._target_qpos
         pin_model.compute_forward_kinematics(full_qpos.cpu().numpy()[0])
-        target_ee_pose_pin = Pose.create(
+        joint_target_ee_pose = Pose.create(
             ori_controller.articulation.pose.sp
             * pin_model.get_link_pose(arm_controller.ee_link.index)
         )
+        target_ee_pose = joint_target_ee_pose
 
         flag = True
         for _ in range(4):
@@ -149,19 +207,19 @@ def from_pd_joint_pos_to_ee(
                 if "root_translation" in arm_controller.config.frame:
                     if use_target:
                         delta_position = (
-                            target_ee_pose_pin.p
+                            target_ee_pose.p
                             - arm_controller._target_pose.p
                             - arm_controller.articulation.pose.p
                         )
                     else:
-                        delta_position = target_ee_pose_pin.p - ee_link.pose.p
+                        delta_position = target_ee_pose.p - ee_link.pose.p
                 if "root_aligned_body_rotation" in arm_controller.config.frame:
                     if use_target:
                         delta_q = (
-                            arm_controller._target_pose.sp * target_ee_pose_pin.sp.inv()
+                            arm_controller._target_pose.sp * target_ee_pose.sp.inv()
                         ).q
                     else:
-                        delta_q = (ee_link.pose.sp * target_ee_pose_pin.sp.inv()).q
+                        delta_q = (ee_link.pose.sp * target_ee_pose.sp.inv()).q
 
                 delta_pose = sapien.Pose(delta_position.cpu().numpy()[0], delta_q)
 
@@ -184,40 +242,32 @@ def from_pd_joint_pos_to_ee(
                 )
                 output_action = controller.from_action_dict(output_action_dict)
             else:
-                # NOTE (stao): We convert from quaternion to matrix to euler angles since this is how the default pd ee pose controller does it
-                # As far as I know this is not notably any slower than a batched version of transforms3d euler2quat.
-
-                # For absolute EE pose control, convert world-frame target pose into
+                # For absolute EE pose control, convert world-frame realized pose into
                 # the target controller articulation-root frame expected by
                 # PDEEPoseController(frame="root_translation:root_aligned_body_rotation").
-                
-                # ===== FIX THE FRAME INCONSISTENCY ISSUE =====
-                target_ee_pose_at_root = arm_controller.articulation.pose.inv() * target_ee_pose_pin
-                # =============================================
+                root_pose = _get_controller_root_pose(arm_controller)
+                realized_ee_pose_at_root = root_pose.inv() * realized_ee_pose
+                joint_target_ee_pose_at_root = root_pose.inv() * joint_target_ee_pose
+                if _target_pose_is_safe(
+                    joint_target_ee_pose_at_root,
+                    last_abs_target_pos,
+                ):
+                    target_ee_pose_at_root = joint_target_ee_pose_at_root
+                else:
+                    target_ee_pose_at_root = realized_ee_pose_at_root
+                last_abs_target_pos = target_ee_pose_at_root.p[0].clone()
+                target_pos = target_ee_pose_at_root.p[0]
+                target_quat = _normalize_quat_tensor(
+                    target_ee_pose_at_root.q[0]
+                )
+                _assert_finite_tensor("target EE position", target_pos)
+                _assert_finite_tensor("target EE quaternion", target_quat)
                 output_action_dict["arm"] = torch.cat(
                     [
-                        common.to_tensor(
-                            target_ee_pose_at_root.p[0], device=env.unwrapped.device
-                        ),
-                        # ===== CHANGE FROM EULER ANGLES TO QUATERNION REPRESENTATION FOR ROTATION CONTROL =====
-                        # common.to_tensor(
-                        #     rotation_conversions.matrix_to_euler_angles(
-                        #         rotation_conversions.quaternion_to_matrix(
-                        #             target_ee_pose_pin.q[0]
-                        #         ),
-                        #         "XYZ",
-                        #     ),
-                        #     device=env.unwrapped.device,
-                        # ),
-                        common.to_tensor(
-                            target_ee_pose_at_root.q[0], device=env.unwrapped.device
-                        ),
-                        # ======================================================================================
+                        common.to_tensor(target_pos, device=env.unwrapped.device),
+                        common.to_tensor(target_quat, device=env.unwrapped.device),
                     ]
                 )
-                # ===== FIX THE FRAME INCONSISTENCY ISSUE =====
-                # output_action_dict["arm"][:3] -= arm_controller.articulation.pose.p[0]
-                # =============================================
                 output_action = controller.from_action_dict(output_action_dict)
 
             _, _, _, _, info = env.step(output_action)
