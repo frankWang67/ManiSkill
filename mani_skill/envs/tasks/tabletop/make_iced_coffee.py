@@ -402,14 +402,34 @@ class MakeIcedCoffeeEnv(BaseEnv):
             path_yaw = torch.atan2(path_dir[:, 1], path_dir[:, 0])
 
             if self.harder:
-                use_transfer = torch.rand((b), device=self.device) < 0.9
+                # Radii for clearance calculation (use visual model half-extents)
+                dish_visual_r = float(max(self._model_meta[self.dish_model_id]["half_extents"][:2]))
+                cup_visual_r = float(max(self._model_meta[self.cup_model_id]["half_extents"][:2]))
+                margin = 0.02
+
+                def _obs_radius(model_id: str) -> float:
+                    he = self._model_meta[model_id]["half_extents"]
+                    return float(max(he[0], he[1]))
+
+                def _safe_fraction(obs_radius: float, path_dist: torch.Tensor):
+                    """Fraction range [min, max] along path where obstacle is clear of dish/cup."""
+                    min_f = (dish_visual_r + obs_radius + margin) / path_dist.clamp(min=1e-6)
+                    max_f = 1.0 - (cup_visual_r + obs_radius + margin) / path_dist.clamp(min=1e-6)
+                    return min_f, max_f
+
+                path_dist_1d = path_norm.squeeze(-1)
+
+                # --- Transfer obstacles (blockers near the direct path) ---
+                use_transfer = torch.rand((b), device=self.device) < 0.85
                 transfer_count = torch.where(
                     torch.rand((b), device=self.device) < 0.5,
                     torch.ones((b), device=self.device, dtype=torch.int64),
                     torch.full((b,), 2, device=self.device, dtype=torch.int64),
                 )
-                use_table = torch.rand((b), device=self.device) < 0.8
-                table_count = torch.randint(1, 4, (b,), device=self.device)
+
+                # --- Table obstacles (wider lateral spread) ---
+                use_table = torch.rand((b), device=self.device) < 0.7
+                table_count = torch.randint(1, 3, (b,), device=self.device)
 
                 any_active = use_transfer | use_table
                 force_transfer = ~any_active
@@ -426,58 +446,86 @@ class MakeIcedCoffeeEnv(BaseEnv):
                     -torch.ones((b), device=self.device),
                 )
 
-                transfer0_center = dish_base_pos[:, :2] + path_xy * (
-                    0.44 + (torch.rand((b), device=self.device) - 0.5) * 0.08
-                )[:, None]
-                transfer0_center += perp_dir * (
-                    transfer_sign * (0.03 + torch.rand((b), device=self.device) * 0.03)
-                )[:, None]
-                transfer0_center[:, 0] = torch.clamp(transfer0_center[:, 0], min=0.07, max=0.26)
-                transfer0_active = use_transfer & (transfer_count >= 1)
-                transfer0_yaw = path_yaw + (torch.rand((b), device=self.device) - 0.5) * 0.18
+                # --- Transfer obstacle 0: first half of path ---
+                model_id_t0 = self.harder_transfer_obstacle_model_ids[0]
+                r0 = _obs_radius(model_id_t0)
+                min_f0, max_f0 = _safe_fraction(r0, path_dist_1d)
+                # Restrict to first-half / middle zone; never expand beyond safe range
+                min_f0 = torch.clamp(min_f0, min=0.33)
+                max_f0 = torch.clamp(max_f0, max=0.60)
+                valid0 = min_f0 < max_f0
+                frac_0 = torch.where(
+                    valid0,
+                    min_f0 + (max_f0 - min_f0) * (0.10 + torch.rand((b), device=self.device) * 0.30),
+                    torch.full((b,), 0.5, device=self.device),
+                )
+                transfer0_center = dish_base_pos[:, :2] + path_xy * frac_0[:, None]
+                lateral_0 = transfer_sign * (0.03 + torch.rand((b), device=self.device) * 0.04)
+                transfer0_center += perp_dir * lateral_0[:, None]
+                transfer0_active = use_transfer & (transfer_count >= 1) & valid0
+                transfer0_yaw = path_yaw + (torch.rand((b), device=self.device) - 0.5) * 0.35
                 self._set_ycb_obstacle_pose(
                     self.harder_transfer_obstacles[0],
-                    self.harder_transfer_obstacle_model_ids[0],
+                    model_id_t0,
                     transfer0_center,
                     transfer0_yaw,
                     transfer0_active,
                     hidden_pos,
                 )
 
-                transfer1_center = dish_base_pos[:, :2] + path_xy * (
-                    0.70 + (torch.rand((b), device=self.device) - 0.5) * 0.08
-                )[:, None]
-                transfer1_center += perp_dir * (
-                    -transfer_sign * (0.02 + torch.rand((b), device=self.device) * 0.03)
-                )[:, None]
-                transfer1_center[:, 0] = torch.clamp(transfer1_center[:, 0], min=0.07, max=0.26)
-                transfer1_active = use_transfer & (transfer_count >= 2)
-                transfer1_yaw = path_yaw + (torch.rand((b), device=self.device) - 0.5) * 0.18
+                # --- Transfer obstacle 1: second half of path, opposite side ---
+                model_id_t1 = self.harder_transfer_obstacle_model_ids[1]
+                r1 = _obs_radius(model_id_t1)
+                min_f1, max_f1 = _safe_fraction(r1, path_dist_1d)
+                min_f1 = torch.clamp(min_f1, min=0.45)
+                max_f1 = torch.clamp(max_f1, max=0.72)
+                valid1 = min_f1 < max_f1
+                frac_1 = torch.where(
+                    valid1,
+                    min_f1 + (max_f1 - min_f1) * (0.10 + torch.rand((b), device=self.device) * 0.30),
+                    torch.full((b,), 0.60, device=self.device),
+                )
+                transfer1_center = dish_base_pos[:, :2] + path_xy * frac_1[:, None]
+                lateral_1 = -transfer_sign * (0.03 + torch.rand((b), device=self.device) * 0.05)
+                transfer1_center += perp_dir * lateral_1[:, None]
+                transfer1_active = use_transfer & (transfer_count >= 2) & valid1
+                transfer1_yaw = path_yaw + (torch.rand((b), device=self.device) - 0.5) * 0.35
                 self._set_ycb_obstacle_pose(
                     self.harder_transfer_obstacles[1],
-                    self.harder_transfer_obstacle_model_ids[1],
+                    model_id_t1,
                     transfer1_center,
                     transfer1_yaw,
                     transfer1_active,
                     hidden_pos,
                 )
 
-                table_fractions = [0.30, 0.55, 0.80]
-                table_lateral_base = [0.07, -0.06, 0.05]
+                # --- Table obstacles: varied fractions and wider lateral offsets ---
                 for i, obstacle in enumerate(self.harder_table_obstacles):
                     active_mask = use_table & (table_count > i)
-                    obs_pos = hidden_pos.clone()
-                    posed = torch.zeros((b, 3), device=self.device)
-                    posed[:, :2] = dish_base_pos[:, :2] + path_xy * (
-                        table_fractions[i] + (torch.rand((b), device=self.device) - 0.5) * 0.08
-                    )[:, None]
-                    posed[:, :2] += perp_dir * (
-                        table_lateral_base[i] + (torch.rand((b), device=self.device) - 0.5) * 0.05
-                    )[:, None]
-                    posed[:, 0] = torch.clamp(posed[:, 0], min=0.07, max=0.28)
                     model_id = self.harder_table_obstacle_model_ids[i]
+                    r = _obs_radius(model_id)
+                    min_f, max_f = _safe_fraction(r, path_dist_1d)
+                    min_f = torch.clamp(min_f, min=0.35)
+                    max_f = torch.clamp(max_f, max=0.68)
+                    valid = min_f < max_f
+                    active_mask = active_mask & valid
+
+                    frac = torch.where(
+                        valid,
+                        min_f + (max_f - min_f) * torch.rand((b), device=self.device),
+                        torch.full((b,), 0.5, device=self.device),
+                    )
+                    side_sign = torch.where(
+                        torch.rand((b), device=self.device) < 0.5,
+                        torch.ones((b), device=self.device),
+                        -torch.ones((b), device=self.device),
+                    )
+                    lateral = side_sign * (0.06 + torch.rand((b), device=self.device) * 0.06)
+
+                    posed = torch.zeros((b, 3), device=self.device)
+                    posed[:, :2] = dish_base_pos[:, :2] + path_xy * frac[:, None] + perp_dir * lateral[:, None]
                     posed[:, 2] = self._model_meta[model_id]["bottom_z"]
-                    obs_pos = torch.where(active_mask[:, None], posed, obs_pos)
+                    obs_pos = torch.where(active_mask[:, None], posed, hidden_pos)
                     obs_q = randomization.random_quaternions(
                         n=b, device=self.device, lock_x=True, lock_y=True
                     )
