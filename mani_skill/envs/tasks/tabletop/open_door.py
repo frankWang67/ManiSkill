@@ -129,7 +129,7 @@ class OpenDoorEnv(BaseEnv):
     def _build_obstacles(self):
         wall_mat = create_colored_material([0.85, 0.15, 0.15, 1.0])
         self.obstacle_half_sizes = [
-            [0.12, 0.14, 0.02],
+            [0.12, 0.14, 0.25],
         ]
         self.obstacles = []
         for i, hs in enumerate(self.obstacle_half_sizes):
@@ -301,8 +301,11 @@ class OpenDoorEnv(BaseEnv):
                 robot_pos = self.agent.robot.pose.p[env_idx]
 
                 # Place a horizontal platform on the straight robot->handle corridor.
-                wall_center = robot_pos * 0.60 + handle * 0.40
-                wall_center[:, 2] = handle[:, 2] - 0.05
+                robot_to_handle = handle - robot_pos
+                robot_to_handle_dir = robot_to_handle / torch.linalg.norm(robot_to_handle, dim=1, keepdim=True)
+                ortho_dir = torch.cross(robot_to_handle_dir, torch.tensor([0.0, 0.0, 1.0], device=self.device).expand_as(robot_to_handle_dir))
+                wall_center = robot_pos * 0.60 + handle * 0.40 + ortho_dir * 0.4
+                wall_center[:, 2] = self.obstacle_half_sizes[0][2] + 1e-3
 
                 wall_q = torch.zeros((b, 4), device=self.device, dtype=torch.float32)
                 wall_q[:, 0] = 1.0
