@@ -137,6 +137,11 @@ class TableSceneBuilder(SceneBuilder):
             "panda_robotiq_wristcam",
             "floating_robotiq_2f_85_gripper",
             "floating_robotiq_2f_85_gripper_wristcam",
+            "iiwa7_robotiq_wristcam",
+            "gen3_6dof_robotiq_wristcam",
+            "gen3_7dof_robotiq_wristcam",
+            "rizon4_robotiq_wristcam",
+            "sawyer_robotiq_wristcam",
         ]:
             qpos = self.env.agent.keyframes["rest"].qpos
             # qpos = (

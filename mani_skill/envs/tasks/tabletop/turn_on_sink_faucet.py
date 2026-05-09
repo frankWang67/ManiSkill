@@ -12,6 +12,11 @@ from mani_skill.agents.robots import (
     UR5RobotiqWristCamera,
     XArm6RobotiqWristCamera,
     XArm7RobotiqWristCamera,
+    IIwa7RobotiqWristCamera,
+    Gen36DofRobotiqWristCamera,
+    Gen37DofRobotiqWristCamera,
+    Rizon4RobotiqWristCamera,
+    SawyerRobotiqWristCamera,
 )
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.sensors.camera import CameraConfig
@@ -35,6 +40,11 @@ ROBOT_FRONT_FACING_SIZE.update(
         "xarm6_robotiq_wristcam": 0.3,
         "xarm7_robotiq_wristcam": 0.3,
         "floating_robotiq_2f_85_gripper_wristcam": 0.3,
+        "iiwa7_robotiq_wristcam": 0.3,
+        "gen3_6dof_robotiq_wristcam": 0.3,
+        "gen3_7dof_robotiq_wristcam": 0.3,
+        "rizon4_robotiq_wristcam": 0.3,
+        "sawyer_robotiq_wristcam": 0.3,
     }
 )
 
@@ -56,6 +66,11 @@ class TurnOnSinkFaucetEnv(BaseEnv):
         "xarm6_robotiq_wristcam",
         "xarm7_robotiq_wristcam",
         "floating_robotiq_2f_85_gripper_wristcam",
+        "iiwa7_robotiq_wristcam",
+        "gen3_6dof_robotiq_wristcam",
+        "gen3_7dof_robotiq_wristcam",
+        "rizon4_robotiq_wristcam",
+        "sawyer_robotiq_wristcam",
     ]
     SUPPORTED_REWARD_MODES = ["sparse", "dense", "none"]
     agent: Union[
@@ -64,6 +79,11 @@ class TurnOnSinkFaucetEnv(BaseEnv):
         XArm6RobotiqWristCamera,
         XArm7RobotiqWristCamera,
         FloatingRobotiq2F85GripperWristCamera,
+        IIwa7RobotiqWristCamera,
+        Gen36DofRobotiqWristCamera,
+        Gen37DofRobotiqWristCamera,
+        Rizon4RobotiqWristCamera,
+        SawyerRobotiqWristCamera,
     ]
 
     def __init__(

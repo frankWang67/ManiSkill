@@ -14,6 +14,11 @@ from mani_skill.agents.robots import (
     UR5RobotiqWristCamera,
     XArm6RobotiqWristCamera,
     XArm7RobotiqWristCamera,
+    IIwa7RobotiqWristCamera,
+    Gen36DofRobotiqWristCamera,
+    Gen37DofRobotiqWristCamera,
+    Rizon4RobotiqWristCamera,
+    SawyerRobotiqWristCamera,
 )
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.sensors.camera import CameraConfig
@@ -38,6 +43,11 @@ class HangMugEnv(BaseEnv):
         "xarm6_robotiq_wristcam",
         "xarm7_robotiq_wristcam",
         "floating_robotiq_2f_85_gripper_wristcam",
+        "iiwa7_robotiq_wristcam",
+        "gen3_6dof_robotiq_wristcam",
+        "gen3_7dof_robotiq_wristcam",
+        "rizon4_robotiq_wristcam",
+        "sawyer_robotiq_wristcam",
     ]
     agent: Union[
         PandaRobotiqWristCamera,
@@ -45,6 +55,11 @@ class HangMugEnv(BaseEnv):
         XArm6RobotiqWristCamera,
         XArm7RobotiqWristCamera,
         FloatingRobotiq2F85GripperWristCamera,
+        IIwa7RobotiqWristCamera,
+        Gen36DofRobotiqWristCamera,
+        Gen37DofRobotiqWristCamera,
+        Rizon4RobotiqWristCamera,
+        SawyerRobotiqWristCamera,
     ]
 
     # RoboTwin initial poses used in hanging_mug.py

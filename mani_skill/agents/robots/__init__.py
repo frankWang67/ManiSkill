@@ -7,14 +7,18 @@ from .floating_panda_gripper import FloatingPandaGripper, FloatingPandaGripperWr
 from .floating_robotiq_2f_85_gripper import *
 from .googlerobot import *
 from .humanoid import Humanoid
+from .flexiv import Rizon4RobotiqWristCamera
+from .iiwa import IIwa7RobotiqWristCamera
 from .inspire_hand import (
     FixedInspireHandLeft,
     FixedInspireHandRight,
     FloatingInspireHandLeft,
     FloatingInspireHandRight,
 )
+from .kinova import Gen36DofRobotiqWristCamera, Gen37DofRobotiqWristCamera
 from .koch import *
 from .panda import *
+from .sawyer import SawyerRobotiqWristCamera
 from .so100 import *
 from .stompy import Stompy
 from .trifingerpro import TriFingerPro
