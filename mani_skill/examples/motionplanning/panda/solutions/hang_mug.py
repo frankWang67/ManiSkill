@@ -15,8 +15,8 @@ JOINT_ACC_LIMITS = 0.5
 FINGER_LENGTH = 0.025
 EDGE_INSET = 0.012
 PRE_GRASP_DIST = 0.10
-LIFT_EXTRA_Z = 0.16
-MIN_CRUISE_Z = 0.34
+LIFT_EXTRA_Z = 0.03
+MIN_CRUISE_Z = 0.23
 HOME_CLEARANCE_EXTRA_Z = 0.10
 LEFT_TARGET_BACKOFF_REACHABLE = 0.005
 LEFT_TARGET_BACKOFF_UNREACHABLE = 0.01
@@ -24,7 +24,10 @@ LEFT_RELEASE_SETTLE_STEPS = 24
 LEFT_VERTICAL_CLEARANCE_Z = 0.02
 MIN_LIFTED_DELTA_Z = 0.03
 RETREAT_BACKOFF = 0.10
+RETREAT_BACKOFF_STEPS = (0.03, 0.06, 0.10)
 RETREAT_UP = -0.03
+PRE_RELEASE_SEAT_BACKOFF = 0.02
+PRE_RELEASE_SEAT_DOWN = -0.02
 OPEN_RELEASE_STEPS = 10
 POST_RELEASE_SETTLE_STEPS = 12
 RETURN_HOME_STEPS = 36
@@ -34,6 +37,8 @@ POSE_INTERP_SEGMENTS = (2, 4)
 MAX_RRT_PLAN_STEPS = 120
 MAX_RRT_CUM_JOINT_TRAVEL = 4.0
 MAX_RRT_MAX_STEP = 0.08
+MAX_RRT_DETOUR_RATIO = 2.5
+MIN_RRT_EFFECTIVE_DIRECT_JOINT = 0.2
 GRASP_VERIFY_STEPS = 6
 MAX_GRASP_VERIFY_POS_ERR = 0.08
 MAX_GRASP_VERIFY_DROP = 0.04
@@ -141,10 +146,12 @@ def _path_metrics(result):
 
 def _rrt_plan_is_reasonable(result) -> bool:
     metrics = _path_metrics(result)
+    effective_direct_joint = max(metrics["direct_joint"], MIN_RRT_EFFECTIVE_DIRECT_JOINT)
     return (
         metrics["steps"] <= MAX_RRT_PLAN_STEPS
         and metrics["cum_joint"] <= MAX_RRT_CUM_JOINT_TRAVEL
         and metrics["max_step"] <= MAX_RRT_MAX_STEP
+        and metrics["cum_joint"] <= MAX_RRT_DETOUR_RATIO * effective_direct_joint
     )
 
 
@@ -175,6 +182,8 @@ def _move(planner, pose: sapien.Pose, dry_run: bool = False):
 
     rrt = _plan_rrt_result(planner, pose)
     if rrt["status"] != "Success":
+        return -1
+    if not _rrt_plan_is_reasonable(rrt):
         return -1
     if dry_run:
         return rrt
@@ -227,7 +236,7 @@ def _can_plan_pose(planner, pose: sapien.Pose) -> bool:
         planner_name="RRTstar",
         wrt_world=True,
     )
-    return rrt["status"] == "Success"
+    return rrt["status"] == "Success" and _rrt_plan_is_reasonable(rrt)
 
 
 def _can_plan_screw_pose(planner, pose: sapien.Pose) -> bool:
@@ -327,11 +336,25 @@ def _release_state(info):
     )
 
 
-def _build_retreat_pose(env, retreat_dir: np.ndarray, z_offset: float):
+def _build_retreat_pose(
+    env, retreat_dir: np.ndarray, z_offset: float, backoff: float = RETREAT_BACKOFF
+):
     tcp_pose = _to_sapien_pose(env.agent.tcp_pose)
     return sapien.Pose(
         p=tcp_pose.p
-        + retreat_dir * RETREAT_BACKOFF
+        + retreat_dir * backoff
+        + np.array([0.0, 0.0, z_offset], dtype=np.float64),
+        q=tcp_pose.q,
+    )
+
+
+def _build_pre_release_seat_pose(
+    env, retreat_dir: np.ndarray, backoff: float, z_offset: float
+):
+    tcp_pose = _to_sapien_pose(env.agent.tcp_pose)
+    return sapien.Pose(
+        p=tcp_pose.p
+        + retreat_dir * backoff
         + np.array([0.0, 0.0, z_offset], dtype=np.float64),
         q=tcp_pose.q,
     )
@@ -510,60 +533,59 @@ def solve(env, seed=None, debug=False, vis=False):
         branch_dir = _normalize(_first_np(hang_pose["approach"]))
 
         # ------------------------------------------------------------------ #
-        # 4) Rotate first, then directly transfer to target hang pose
+        # 4) Directly rotate while transferring near the target hang pose
         # ------------------------------------------------------------------ #
         current_tcp_pose = _to_sapien_pose(env.agent.tcp_pose)
-        rotate_pose_current_xy = sapien.Pose(
-            p=np.array(
-                [current_tcp_pose.p[0], current_tcp_pose.p[1], max(lift_z, current_tcp_pose.p[2])],
-                dtype=np.float64,
-            ),
-            q=target_tcp_pose.q,
-        )
-        rotate_pose_target_xy = sapien.Pose(
+        transfer_pose = sapien.Pose(
             p=np.array(
                 [target_tcp_pose.p[0], target_tcp_pose.p[1], max(lift_z, current_tcp_pose.p[2])],
                 dtype=np.float64,
             ),
             q=target_tcp_pose.q,
         )
-        do_rotate = True
-        if target_branch_idx == LEFT_BRANCH_IDX:
-            if _can_plan_screw_pose(planner, rotate_pose_target_xy):
-                rotate_pose = rotate_pose_target_xy
-            else:
-                left_target_backoff = (
-                    LEFT_TARGET_BACKOFF_REACHABLE
-                    if _can_plan_pose(planner, rotate_pose_target_xy)
-                    else LEFT_TARGET_BACKOFF_UNREACHABLE
-                )
-                target_mug_pose = sapien.Pose(
-                    p=np.asarray(target_mug_pose.p, dtype=np.float64)
-                    - branch_dir * left_target_backoff,
-                    q=target_mug_pose.q,
-                )
-                target_tcp_pose = target_mug_pose * mug_to_tcp
-                rotate_pose = sapien.Pose(
-                    p=np.array(
-                        [current_tcp_pose.p[0], current_tcp_pose.p[1], max(lift_z, current_tcp_pose.p[2])],
-                        dtype=np.float64,
-                    ),
-                    q=target_tcp_pose.q,
-                )
-        else:
-            rotate_pose = rotate_pose_current_xy
-            if not _can_plan_pose(planner, rotate_pose_current_xy):
-                do_rotate = False
-        if do_rotate and _move(planner, rotate_pose) == -1:
+        if not _can_plan_screw_pose(planner, transfer_pose):
+            target_backoff = (
+                LEFT_TARGET_BACKOFF_REACHABLE
+                if _can_plan_pose(planner, transfer_pose)
+                else LEFT_TARGET_BACKOFF_UNREACHABLE
+            )
+            target_mug_pose = sapien.Pose(
+                p=np.asarray(target_mug_pose.p, dtype=np.float64) - branch_dir * target_backoff,
+                q=target_mug_pose.q,
+            )
+            target_tcp_pose = target_mug_pose * mug_to_tcp
+            transfer_pose = sapien.Pose(
+                p=np.array(
+                    [target_tcp_pose.p[0], target_tcp_pose.p[1], max(lift_z, current_tcp_pose.p[2])],
+                    dtype=np.float64,
+                ),
+                q=target_tcp_pose.q,
+            )
+        if _move(planner, transfer_pose) == -1:
             return -1
-        
+
         mug_to_tcp = _to_sapien_pose(env.mug.pose.inv() * env.agent.tcp_pose)
         target_tcp_pose = target_mug_pose * mug_to_tcp
-        if _move(planner, target_tcp_pose) == -1:
+        if _move_local(planner, target_tcp_pose) == -1:
             return -1
 
         if not _verify_physical_grasp(planner, env, mug_in_tcp):
             return -1
+
+        pre_release_retreat_dir = _compute_release_retreat_dir(
+            branch_dir,
+            target_branch_idx,
+            prefer_side_retreat=True,
+        )
+        pre_release_seat_pose = _build_pre_release_seat_pose(
+            env,
+            pre_release_retreat_dir,
+            PRE_RELEASE_SEAT_BACKOFF,
+            PRE_RELEASE_SEAT_DOWN,
+        )
+        if _can_plan_pose(planner, pre_release_seat_pose):
+            if _move_local(planner, pre_release_seat_pose) == -1:
+                return -1
 
         # Release is purely physical from here.
         planner.open_gripper(t=OPEN_RELEASE_STEPS)
@@ -584,15 +606,15 @@ def solve(env, seed=None, debug=False, vis=False):
         # 5) Return to initial pose
         # ------------------------------------------------------------------ #
         if (
-            target_branch_idx == LEFT_BRANCH_IDX
-            and _scalar_bool(release_info["is_hung"])
+            _scalar_bool(release_info["is_hung"])
             and (not _scalar_bool(release_info["is_release_stable"]))
+            and (not _scalar_bool(release_info["released_hang_candidate"]))
         ):
             _hold_current_qpos(planner, POST_RELEASE_SETTLE_STEPS)
             release_info = env.evaluate()
             if debug:
                 print(
-                    f"[release/post_left_extra_settle] branch={target_branch_idx} "
+                    f"[release/post_extra_settle] branch={target_branch_idx} "
                     f"{_release_state(release_info)}"
                 )
 
@@ -672,27 +694,40 @@ def solve(env, seed=None, debug=False, vis=False):
                     target_branch_idx,
                     prefer_side_retreat=(retreat_mode == "side"),
                 )
-                retreat_pose = _build_retreat_pose(env, retreat_dir, retreat_z_offset)
-                reachable = _can_plan_pose(planner, retreat_pose)
-                if debug:
-                    print(
-                        f"[release/retreat_dir] branch={target_branch_idx} "
-                        f"mode={retreat_mode} dir={retreat_dir} "
-                        f"z={retreat_z_offset} reachable={reachable}"
+                for retreat_backoff in RETREAT_BACKOFF_STEPS:
+                    retreat_pose = _build_retreat_pose(
+                        env, retreat_dir, retreat_z_offset, backoff=retreat_backoff
                     )
-                if not reachable:
-                    continue
-                if _move_local(planner, retreat_pose) == -1:
-                    continue
-                retreat_succeeded = True
-                break
-            _hold_current_qpos(planner, POST_RELEASE_SETTLE_STEPS)
-            release_info = env.evaluate()
-            if debug:
-                print(
-                    f"[release/post_retreat] branch={target_branch_idx} "
-                    f"moved={retreat_succeeded} {_release_state(release_info)}"
-                )
+                    reachable = _can_plan_pose(planner, retreat_pose)
+                    if debug:
+                        print(
+                            f"[release/retreat_dir] branch={target_branch_idx} "
+                            f"mode={retreat_mode} dir={retreat_dir} "
+                            f"z={retreat_z_offset} backoff={retreat_backoff} "
+                            f"reachable={reachable}"
+                        )
+                    if not reachable:
+                        continue
+                    if _move_local(planner, retreat_pose) == -1:
+                        continue
+                    retreat_succeeded = True
+                    _hold_current_qpos(planner, POST_RELEASE_SETTLE_STEPS)
+                    release_info = env.evaluate()
+                    if debug:
+                        print(
+                            f"[release/post_retreat] branch={target_branch_idx} "
+                            f"mode={retreat_mode} z={retreat_z_offset} "
+                            f"backoff={retreat_backoff} "
+                            f"{_release_state(release_info)}"
+                        )
+                    if _scalar_bool(release_info["released_hang_candidate"]) or _scalar_bool(
+                        release_info["is_release_stable"]
+                    ):
+                        break
+                if _scalar_bool(release_info["released_hang_candidate"]) or _scalar_bool(
+                    release_info["is_release_stable"]
+                ):
+                    break
 
         if _scalar_bool(release_info["is_hung"]) and (
             not _scalar_bool(release_info["is_release_stable"])
@@ -763,10 +798,10 @@ def solve(env, seed=None, debug=False, vis=False):
             returned_home_with_pose = _move(planner, home_tcp_pose) != -1
 
         if not returned_home_with_pose:
-
             _move_to_qpos_linearly(planner, home_qpos, steps=RETURN_HOME_STEPS)
-
-        _hold_target_qpos(planner, home_qpos, steps=RETURN_HOME_SETTLE_STEPS)
+            _hold_target_qpos(planner, home_qpos, steps=RETURN_HOME_SETTLE_STEPS)
+        else:
+            _hold_current_qpos(planner, RETURN_HOME_SETTLE_STEPS)
         release_info = env.evaluate()
         if _scalar_bool(release_info["released_hang_candidate"]) and (
             not _scalar_bool(release_info["is_release_stable"])
@@ -779,7 +814,10 @@ def solve(env, seed=None, debug=False, vis=False):
                 )
             )
             if remaining_settle > 0:
-                _hold_target_qpos(planner, home_qpos, steps=remaining_settle)
+                if returned_home_with_pose:
+                    _hold_current_qpos(planner, remaining_settle)
+                else:
+                    _hold_target_qpos(planner, home_qpos, steps=remaining_settle)
                 release_info = env.evaluate()
 
         if debug:
@@ -787,7 +825,10 @@ def solve(env, seed=None, debug=False, vis=False):
                 f"[release/post_home] branch={target_branch_idx} "
                 f"{_release_state(release_info)}"
             )
-        res = _hold_target_qpos(planner, home_qpos, FINAL_SETTLE_STEPS)
+        if returned_home_with_pose:
+            res = _hold_current_qpos(planner, FINAL_SETTLE_STEPS)
+        else:
+            res = _hold_target_qpos(planner, home_qpos, FINAL_SETTLE_STEPS)
         return res
     finally:
         planner.close()

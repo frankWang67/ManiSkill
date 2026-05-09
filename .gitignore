@@ -48,3 +48,7 @@ htmlcov/
 # training
 wandb
 runs
+
+# agent
+.codex
+.claude

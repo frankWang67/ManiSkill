@@ -81,14 +81,17 @@ class MakeIcedCoffeeEnv(BaseEnv):
 
     dish_model_id = "024_bowl"
     cup_model_id = "025_mug"
-    harder_transfer_obstacle_model_ids = [
+    harder_pick_place_obstacle_model_ids = [
         "021_bleach_cleanser",
         "003_cracker_box",
-    ]
-    harder_table_obstacle_model_ids = [
         "006_mustard_bottle",
         "003_cracker_box",
         "021_bleach_cleanser",
+    ]
+    # Tall wall to block the lifted transport trajectory (TCP z ≥ 0.26).
+    # Half-sizes: [thin along path, wide perpendicular to path, tall].
+    taller_transport_half_sizes = [
+        [0.015, 0.09, 0.15],
     ]
 
     def __init__(
@@ -116,8 +119,7 @@ class MakeIcedCoffeeEnv(BaseEnv):
         for model_id in [
             self.dish_model_id,
             self.cup_model_id,
-            *self.harder_transfer_obstacle_model_ids,
-            *self.harder_table_obstacle_model_ids,
+            *self.harder_pick_place_obstacle_model_ids,
         ]:
             if model_id not in ycb_meta:
                 continue
@@ -317,24 +319,29 @@ class MakeIcedCoffeeEnv(BaseEnv):
             add_visual=False,
         )
 
-        self.harder_transfer_obstacles = []
-        for i, model_id in enumerate(self.harder_transfer_obstacle_model_ids):
-            self.harder_transfer_obstacles.append(
+        self.harder_pick_place_obstacles = []
+        for i, model_id in enumerate(self.harder_pick_place_obstacle_model_ids):
+            self.harder_pick_place_obstacles.append(
                 self._build_ycb_actor(
                     model_id,
-                    f"harder_transfer_obstacle_{i}",
+                    f"harder_pick_place_obstacle_{i}",
                     body_type="kinematic",
                     add_collision=True,
                     add_visual=True,
                 )
             )
 
-        self.harder_table_obstacles = []
-        for i, model_id in enumerate(self.harder_table_obstacle_model_ids):
-            obstacle = self._build_ycb_actor(
-                model_id, f"harder_table_obstacle_{i}", body_type="kinematic"
+        self.taller_transport_obstacles = []
+        for i, half_size in enumerate(self.taller_transport_half_sizes):
+            obstacle = actors.build_box(
+                self.scene,
+                half_sizes=half_size,
+                color=[0.65, 0.35, 0.35, 1.0],
+                name=f"taller_transport_obstacle_{i}",
+                body_type="kinematic",
+                initial_pose=sapien.Pose(p=[0, 0, -10]),
             )
-            self.harder_table_obstacles.append(obstacle)
+            self.taller_transport_obstacles.append(obstacle)
 
         self.ice_cube = actors.build_cube(
             self.scene,
@@ -406,7 +413,7 @@ class MakeIcedCoffeeEnv(BaseEnv):
 
             hidden_pos = torch.zeros((b, 3), device=self.device)
             hidden_pos[:, 2] = -10
-            all_hidable_obstacles = self.harder_transfer_obstacles + self.harder_table_obstacles
+            all_hidable_obstacles = self.harder_pick_place_obstacles + self.taller_transport_obstacles
             for obstacle in all_hidable_obstacles:
                 obstacle.set_pose(Pose.create_from_pq(hidden_pos))
 
@@ -417,137 +424,116 @@ class MakeIcedCoffeeEnv(BaseEnv):
             path_yaw = torch.atan2(path_dir[:, 1], path_dir[:, 0])
 
             if self.harder:
-                # Radii for clearance calculation (use visual model half-extents)
+                # Radii for clearance calculation (use visual model half-extents).
                 dish_visual_r = float(max(self._model_meta[self.dish_model_id]["half_extents"][:2]))
                 cup_visual_r = float(max(self._model_meta[self.cup_model_id]["half_extents"][:2]))
-                margin = 0.02
+                margin = 0.05
 
                 def _obs_radius(model_id: str) -> float:
                     he = self._model_meta[model_id]["half_extents"]
                     return float(max(he[0], he[1]))
 
-                def _safe_fraction(obs_radius: float, path_dist: torch.Tensor):
-                    """Fraction range [min, max] along path where obstacle is clear of dish/cup."""
-                    min_f = (dish_visual_r + obs_radius + margin) / path_dist.clamp(min=1e-6)
-                    max_f = 1.0 - (cup_visual_r + obs_radius + margin) / path_dist.clamp(min=1e-6)
-                    return min_f, max_f
-
                 path_dist_1d = path_norm.squeeze(-1)
 
-                # --- Transfer obstacles (blockers near the direct path) ---
-                use_transfer = torch.rand((b), device=self.device) < 0.85
-                transfer_count = torch.where(
-                    torch.rand((b), device=self.device) < 0.5,
-                    torch.ones((b), device=self.device, dtype=torch.int64),
-                    torch.full((b,), 2, device=self.device, dtype=torch.int64),
-                )
+                # --- Pick/Place obstacles (YCB objects near dish/cup, robot side) ---
+                # Alternate assignment: even indices near dish, odd indices near cup.
+                # Robot base is at x ≈ -0.522, so the robot-facing side is negative-x.
+                for i, (actor, model_id) in enumerate(
+                    zip(self.harder_pick_place_obstacles, self.harder_pick_place_obstacle_model_ids)
+                ):
+                    near_dish = i % 2 == 0
+                    active = torch.rand((b,), device=self.device) < 0.65
 
-                # --- Table obstacles (wider lateral spread) ---
-                use_table = torch.rand((b), device=self.device) < 0.7
-                table_count = torch.randint(1, 3, (b,), device=self.device)
+                    if near_dish:
+                        ref_center = dish_base_pos[:, :2]
+                        ref_r = dish_visual_r
+                    else:
+                        ref_center = cup_base_pos[:, :2]
+                        ref_r = cup_visual_r
 
-                any_active = use_transfer | use_table
-                force_transfer = ~any_active
-                use_transfer = use_transfer | force_transfer
-                transfer_count = torch.where(
-                    force_transfer,
-                    torch.ones_like(transfer_count),
-                    transfer_count,
-                )
-
-                transfer_sign = torch.where(
-                    torch.rand((b), device=self.device) < 0.5,
-                    torch.ones((b), device=self.device),
-                    -torch.ones((b), device=self.device),
-                )
-
-                # --- Transfer obstacle 0: first half of path ---
-                model_id_t0 = self.harder_transfer_obstacle_model_ids[0]
-                r0 = _obs_radius(model_id_t0)
-                min_f0, max_f0 = _safe_fraction(r0, path_dist_1d)
-                # Restrict to first-half / middle zone; never expand beyond safe range
-                min_f0 = torch.clamp(min_f0, min=0.33)
-                max_f0 = torch.clamp(max_f0, max=0.60)
-                valid0 = min_f0 < max_f0
-                frac_0 = torch.where(
-                    valid0,
-                    min_f0 + (max_f0 - min_f0) * (0.10 + torch.rand((b), device=self.device) * 0.30),
-                    torch.full((b,), 0.5, device=self.device),
-                )
-                transfer0_center = dish_base_pos[:, :2] + path_xy * frac_0[:, None]
-                lateral_0 = transfer_sign * (0.03 + torch.rand((b), device=self.device) * 0.04)
-                transfer0_center += perp_dir * lateral_0[:, None]
-                transfer0_active = use_transfer & (transfer_count >= 1) & valid0
-                transfer0_yaw = path_yaw + (torch.rand((b), device=self.device) - 0.5) * 0.35
-                self._set_ycb_obstacle_pose(
-                    self.harder_transfer_obstacles[0],
-                    model_id_t0,
-                    transfer0_center,
-                    transfer0_yaw,
-                    transfer0_active,
-                    hidden_pos,
-                )
-
-                # --- Transfer obstacle 1: second half of path, opposite side ---
-                model_id_t1 = self.harder_transfer_obstacle_model_ids[1]
-                r1 = _obs_radius(model_id_t1)
-                min_f1, max_f1 = _safe_fraction(r1, path_dist_1d)
-                min_f1 = torch.clamp(min_f1, min=0.45)
-                max_f1 = torch.clamp(max_f1, max=0.72)
-                valid1 = min_f1 < max_f1
-                frac_1 = torch.where(
-                    valid1,
-                    min_f1 + (max_f1 - min_f1) * (0.10 + torch.rand((b), device=self.device) * 0.30),
-                    torch.full((b,), 0.60, device=self.device),
-                )
-                transfer1_center = dish_base_pos[:, :2] + path_xy * frac_1[:, None]
-                lateral_1 = -transfer_sign * (0.03 + torch.rand((b), device=self.device) * 0.05)
-                transfer1_center += perp_dir * lateral_1[:, None]
-                transfer1_active = use_transfer & (transfer_count >= 2) & valid1
-                transfer1_yaw = path_yaw + (torch.rand((b), device=self.device) - 0.5) * 0.35
-                self._set_ycb_obstacle_pose(
-                    self.harder_transfer_obstacles[1],
-                    model_id_t1,
-                    transfer1_center,
-                    transfer1_yaw,
-                    transfer1_active,
-                    hidden_pos,
-                )
-
-                # --- Table obstacles: varied fractions and wider lateral offsets ---
-                for i, obstacle in enumerate(self.harder_table_obstacles):
-                    active_mask = use_table & (table_count > i)
-                    model_id = self.harder_table_obstacle_model_ids[i]
-                    r = _obs_radius(model_id)
-                    min_f, max_f = _safe_fraction(r, path_dist_1d)
-                    min_f = torch.clamp(min_f, min=0.35)
-                    max_f = torch.clamp(max_f, max=0.68)
-                    valid = min_f < max_f
-                    active_mask = active_mask & valid
-
-                    frac = torch.where(
-                        valid,
-                        min_f + (max_f - min_f) * torch.rand((b), device=self.device),
-                        torch.full((b,), 0.5, device=self.device),
-                    )
-                    side_sign = torch.where(
-                        torch.rand((b), device=self.device) < 0.5,
-                        torch.ones((b), device=self.device),
-                        -torch.ones((b), device=self.device),
-                    )
-                    lateral = side_sign * (0.06 + torch.rand((b), device=self.device) * 0.06)
-
+                    obs_r = _obs_radius(model_id)
                     posed = torch.zeros((b, 3), device=self.device)
-                    posed[:, :2] = dish_base_pos[:, :2] + path_xy * frac[:, None] + perp_dir * lateral[:, None]
+                    # Place on robot side (negative x), clear of the receptacle.
+                    posed[:, 0] = (
+                        ref_center[:, 0] - ref_r - obs_r - margin
+                        - torch.rand((b,), device=self.device) * 0.03
+                    )
+                    posed[:, 0] = torch.clamp(posed[:, 0], min=-0.25)
+                    # Spread obstacles in y around the reference center.
+                    y_offset = (torch.rand((b,), device=self.device) - 0.5) * 0.08
+                    posed[:, 1] = ref_center[:, 1] + y_offset
                     posed[:, 2] = self._model_meta[model_id]["bottom_z"]
-                    obs_pos = torch.where(active_mask[:, None], posed, hidden_pos)
+
+                    # Also ensure obstacle does not overlap the OTHER receptacle.
+                    if near_dish:
+                        other_center = cup_base_pos[:, :2]
+                        other_r = cup_visual_r
+                    else:
+                        other_center = dish_base_pos[:, :2]
+                        other_r = dish_visual_r
+                    dist_to_other = torch.linalg.norm(posed[:, :2] - other_center, axis=1)
+                    clear_of_other = dist_to_other > (other_r + obs_r + margin)
+
+                    valid = clear_of_other
+                    active = active & valid
+
+                    obs_pos = torch.where(active[:, None], posed, hidden_pos)
                     obs_q = randomization.random_quaternions(
                         n=b, device=self.device, lock_x=True, lock_y=True
                     )
                     identity_q = torch.zeros_like(obs_q)
                     identity_q[:, 0] = 1.0
-                    obs_q = torch.where(active_mask[:, None], obs_q, identity_q)
-                    obstacle.set_pose(Pose.create_from_pq(obs_pos, obs_q))
+                    obs_q = torch.where(active[:, None], obs_q, identity_q)
+                    actor.set_pose(Pose.create_from_pq(obs_pos, obs_q))
+
+                # --- Tall transport wall (blocks the lifted trajectory) ---
+                # The wall is thin along the path (half_x) and wide perpendicular
+                # to it (half_y), oriented to span across the direct dish→cup line.
+                # Only half_x matters for clearance along the path direction.
+                for i, (actor, half_size) in enumerate(
+                    zip(self.taller_transport_obstacles, self.taller_transport_half_sizes)
+                ):
+                    wall_thin_r = float(half_size[0])  # extent along the path
+                    active = torch.rand((b,), device=self.device) < 0.70
+
+                    min_f = (
+                        (dish_visual_r + wall_thin_r + margin)
+                        / path_dist_1d.clamp(min=1e-6)
+                    )
+                    max_f = 1.0 - (
+                        (cup_visual_r + wall_thin_r + margin)
+                        / path_dist_1d.clamp(min=1e-6)
+                    )
+                    valid = min_f < max_f
+                    active = active & valid
+
+                    # Wall sits near the midpoint of the path.
+                    frac = torch.where(
+                        valid,
+                        min_f
+                        + (max_f - min_f)
+                        * torch.clamp(
+                            0.45 + (torch.rand((b,), device=self.device) - 0.5) * 0.16,
+                            min=0.0,
+                            max=1.0,
+                        ),
+                        torch.full((b,), 0.50, device=self.device),
+                    )
+
+                    # Center the wall on the path (no lateral offset).
+                    posed = torch.zeros((b, 3), device=self.device)
+                    posed[:, :2] = dish_base_pos[:, :2] + path_xy * frac[:, None]
+                    posed[:, 2] = half_size[2]
+
+                    obs_pos = torch.where(active[:, None], posed, hidden_pos)
+                    # Orient the wall so its thin side faces along the path
+                    # and its wide side spans across the path.
+                    wall_yaw = path_yaw + (torch.rand((b,), device=self.device) - 0.5) * 0.2
+                    obs_q = self._yaw_to_quat(wall_yaw)
+                    identity_q = torch.zeros_like(obs_q)
+                    identity_q[:, 0] = 1.0
+                    obs_q = torch.where(active[:, None], obs_q, identity_q)
+                    actor.set_pose(Pose.create_from_pq(obs_pos, obs_q))
             else:
                 # Default mode has no additional obstacles.
                 pass
@@ -568,9 +554,9 @@ class MakeIcedCoffeeEnv(BaseEnv):
             return []
         robot_root_inv = self.agent.robot.get_pose().inv()
         obstacles_info = []
-        for i, actor in enumerate(self.harder_transfer_obstacles):
+        for i, actor in enumerate(self.harder_pick_place_obstacles):
             raw_pose = (robot_root_inv * actor.pose).raw_pose
-            model_id = self.harder_transfer_obstacle_model_ids[i]
+            model_id = self.harder_pick_place_obstacle_model_ids[i]
             obstacles_info.append(
                 dict(
                     center=raw_pose[:, :3],
@@ -582,18 +568,18 @@ class MakeIcedCoffeeEnv(BaseEnv):
                     ).expand(raw_pose.shape[0], 3),
                 )
             )
-        for i, actor in enumerate(self.harder_table_obstacles):
+        for i, actor in enumerate(self.taller_transport_obstacles):
             raw_pose = (robot_root_inv * actor.pose).raw_pose
-            half_extents = self._model_meta[self.harder_table_obstacle_model_ids[i]][
-                "half_extents"
-            ]
+            half_sizes = torch.tensor(
+                self.taller_transport_half_sizes[i],
+                dtype=torch.float32,
+                device=raw_pose.device,
+            ).expand(raw_pose.shape[0], 3)
             obstacles_info.append(
                 dict(
                     center=raw_pose[:, :3],
                     quat=raw_pose[:, 3:],
-                    extent=torch.tensor(
-                        half_extents, dtype=torch.float32, device=raw_pose.device
-                    ).expand(raw_pose.shape[0], 3),
+                    extent=half_sizes,
                 )
             )
         return obstacles_info

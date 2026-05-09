@@ -95,6 +95,7 @@ class PickPlaceToasterToCounterEnv(BaseEnv):
         "003_cracker_box",
         "021_bleach_cleanser",
     ]
+    harder_robot_obstacle_contact_force_thresh = 1e-2
 
     def __init__(
         self,
@@ -507,6 +508,11 @@ class PickPlaceToasterToCounterEnv(BaseEnv):
         with torch.device(self.device):
             b = len(env_idx)
             self.table_scene.initialize(env_idx)
+            if not hasattr(self, "episode_failed"):
+                self.episode_failed = torch.zeros(
+                    self.num_envs, device=self.device, dtype=torch.bool
+                )
+            self.episode_failed[env_idx] = False
 
             toaster_base_pos = torch.zeros((b, 3), dtype=torch.float32, device=self.device)
             toaster_base_pos[:, 0] = (
@@ -657,14 +663,39 @@ class PickPlaceToasterToCounterEnv(BaseEnv):
         )
         return torch.logical_and(inside_xy, inside_z)
 
+    def _compute_robot_harder_obstacle_collision(self):
+        fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        max_contact_force = torch.zeros(self.num_envs, device=self.device)
+        if not self.harder:
+            return fail, max_contact_force
+
+        for obstacle in self.harder_obstacles:
+            for link in self.agent.robot.get_links():
+                contact_force = torch.linalg.norm(
+                    self.scene.get_pairwise_contact_forces(link, obstacle), axis=1
+                )
+                max_contact_force = torch.maximum(max_contact_force, contact_force)
+
+        fail = max_contact_force > self.harder_robot_obstacle_contact_force_thresh
+        return fail, max_contact_force
+
     def evaluate(self):
         is_toast_on_plate = self._compute_toast_on_plate()
         is_grasped = self.agent.is_grasping(self.toast)
+        current_fail, robot_obstacle_contact_force = (
+            self._compute_robot_harder_obstacle_collision()
+        )
+        self.episode_failed = torch.logical_or(self.episode_failed, current_fail)
+        fail = self.episode_failed
         success = torch.logical_and(is_toast_on_plate, ~is_grasped)
+        success = torch.logical_and(success, ~fail)
         return {
             "success": success,
+            "fail": fail,
+            "current_fail": current_fail,
             "is_toast_on_plate": is_toast_on_plate,
             "is_grasped": is_grasped,
+            "robot_obstacle_contact_force": robot_obstacle_contact_force,
         }
 
     def get_obstacles_info(self):

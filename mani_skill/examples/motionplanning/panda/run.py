@@ -52,9 +52,16 @@ def parse_args(args=None):
     parser.add_argument("--shader", default="default", type=str, help="Change shader used for rendering. Default is 'default' which is very fast. Can also be 'rt' for ray tracing and generating photo-realistic renders. Can also be 'rt-fast' for a faster but lower quality ray-traced renderer")
     parser.add_argument("--record-dir", type=str, default="demos", help="where to save the recorded trajectories")
     parser.add_argument("--num-procs", type=int, default=1, help="Number of processes to use to help parallelize the trajectory replay process. This uses CPU multiprocessing and only works with the CPU simulation backend at the moment.")
+    parser.add_argument("--seed-start", type=int, default=0, help="Starting seed for trajectory generation.")
     return parser.parse_args()
 
-def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
+def _main(
+    args,
+    proc_id: int = 0,
+    start_seed: int = 0,
+    seed_stride: int = 1,
+    add_proc_suffix: bool = False,
+) -> str:
     env_id = args.env_id
     env_kwargs = dict(
         obs_mode=args.obs_mode,
@@ -77,8 +84,8 @@ def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
     else:
         new_traj_name = args.traj_name
 
-    if args.num_procs > 1:
-        new_traj_name = new_traj_name + "." + str(proc_id)
+    if add_proc_suffix:
+        new_traj_name = new_traj_name + f".proc_{proc_id}"
     env = RecordEpisode(
         env,
         output_dir=osp.join(args.record_dir, env_id, "motionplanning"),
@@ -114,7 +121,7 @@ def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
             solution_episode_lengths.append(elapsed_steps)
         successes.append(success)
         if args.only_count_success and not success:
-            seed += 1
+            seed += seed_stride
             env.flush_trajectory(save=False)
             if args.save_video:
                 env.flush_video(save=False)
@@ -139,7 +146,7 @@ def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
                     # min_episode_length=np.min(solution_episode_lengths)
                 )
             )
-            seed += 1
+            seed += seed_stride
             passed += 1
             if passed == args.num_traj:
                 break
@@ -151,13 +158,16 @@ def main(args):
         if args.num_traj < args.num_procs:
             raise ValueError("Number of trajectories should be greater than or equal to number of processes")
         args.num_traj = args.num_traj // args.num_procs
-        seeds = [*range(0, args.num_procs * args.num_traj, args.num_traj)]
+        seeds = [args.seed_start + i for i in range(args.num_procs)]
         pool = mp.Pool(args.num_procs)
-        proc_args = [(deepcopy(args), i, seeds[i]) for i in range(args.num_procs)]
+        proc_args = [
+            (deepcopy(args), i, seeds[i], args.num_procs, True)
+            for i in range(args.num_procs)
+        ]
         res = pool.starmap(_main, proc_args)
         pool.close()
         # Merge trajectory files
-        output_path = res[0][: -len("0.h5")] + "h5"
+        output_path = res[0].rsplit(".proc_", 1)[0] + ".h5"
         merge_trajectories(output_path, res)
         for h5_path in res:
             tqdm.write(f"Remove {h5_path}")
@@ -166,7 +176,7 @@ def main(args):
             tqdm.write(f"Remove {json_path}")
             os.remove(json_path)
     else:
-        _main(args)
+        _main(args, start_seed=args.seed_start, add_proc_suffix=False)
 
 if __name__ == "__main__":
     # start = time.time()

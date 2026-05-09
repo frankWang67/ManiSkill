@@ -5,6 +5,7 @@ warnings.filterwarnings("ignore", message=".*CUDA reports that you have.*")
 import os
 import sys
 import subprocess
+import json
 from argparse import ArgumentParser
 
 from mani_skill.trajectory.merge_trajectory import merge_trajectories
@@ -68,64 +69,113 @@ def run_command(cmd):
         print(f"Error executing command: {cmd}")
         sys.exit(1)
 
+
+def load_episode_count(json_path):
+    with open(json_path, "r") as f:
+        return len(json.load(f)["episodes"])
+
+
+def load_max_seed(json_path):
+    with open(json_path, "r") as f:
+        episodes = json.load(f)["episodes"]
+    if not episodes:
+        return -1
+    return max(int(ep["episode_seed"]) for ep in episodes)
+
 def main():
     replayed_files = []
 
     for task in tasks:
         print(f"\n=== Processing Robot: {task['name']} ===")
-        
-        # 1. 定义文件名
-        traj_name = f"{task['name']}_{task['env']}"
-        raw_traj_path = f"demos/{task['env']}/motionplanning/{traj_name}.h5"
-        
-        # 2. 运行 Motion Planning 生成轨迹 (run.py)
-        # 对应: python run.py ... --only-count-success
-        cmd_gen = (
-            f"python {task['script_path']} "
-            f"-e {task['env']} "
-            f"-r {task['robot_uid']} "
-            f"--traj-name=\"{traj_name}\" "
-            f"-n {args.traj_num} "
-            f"--sim-backend {args.sim_backend_gen} "
-            f"--num-procs {args.num_procs} "
-            f"--only-count-success "
-        )
-        if args.save_video:
-            cmd_gen += "--save-video "
-            
-        run_command(cmd_gen)
-        
-        # 3. 运行 Replay 生成观测数据 (replay_trajectory.py)
-        # 对应: python -m mani_skill.trajectory.replay_trajectory ...
-        # 注意：回放后生成的文件名会自动加上后缀，我们需要构建这个文件名以便后续合并
-        # 命名规则通常是: {traj_name}.{obs_mode}.{control_mode}.{backend}.h5
+
         suffix = f"{args.obs_mode}.{args.control_mode}.{args.sim_backend_replay}"
-        replayed_traj_path = f"demos/{task['env']}/motionplanning/{traj_name}.{suffix}.h5"
-        
-        cmd_replay = (
-            f"python -m mani_skill.trajectory.replay_trajectory "
-            f"-b {args.sim_backend_replay} "
-            f"--traj-path \"{raw_traj_path}\" "
-            f"--use-first-env-state "
-            f"-c {args.control_mode} "
-            f"-o {args.obs_mode} "
-            f"--num-envs {args.num_procs} "
-            f"--save-traj " # 确保保存回放后的轨迹
-        )
-        if args.save_video:
-            cmd_replay += "--save-video "
-        
-        run_command(cmd_replay)
-        
-        if os.path.exists(replayed_traj_path):
-            replayed_files.append(replayed_traj_path)
+        robot_replayed_files = []
+        remaining = args.traj_num
+        next_seed_start = 0
+        batch_idx = 0
+        while remaining > 0:
+            batch_idx += 1
+            batch_num_procs = max(1, min(args.num_procs, remaining))
+            # replay_trajectory strips everything after the first '.' in traj names,
+            # so batch names must avoid dots to keep per-batch outputs distinct.
+            batch_traj_name = f"{task['name']}_{task['env']}_batch_{batch_idx}"
+            raw_traj_path = f"demos/{task['env']}/motionplanning/{batch_traj_name}.h5"
+            raw_json_path = raw_traj_path.replace(".h5", ".json")
+            replayed_traj_path = (
+                f"demos/{task['env']}/motionplanning/{batch_traj_name}.{suffix}.h5"
+            )
+            replayed_json_path = replayed_traj_path.replace(".h5", ".json")
+
+            print(
+                f"Collecting batch {batch_idx} for {task['name']}: "
+                f"need {remaining} more replay-success demos, seed_start={next_seed_start}"
+            )
+
+            cmd_gen = (
+                f"python {task['script_path']} "
+                f"-e {task['env']} "
+                f"-r {task['robot_uid']} "
+                f"--traj-name=\"{batch_traj_name}\" "
+                f"-n {remaining} "
+                f"--seed-start {next_seed_start} "
+                f"--sim-backend {args.sim_backend_gen} "
+                f"--num-procs {batch_num_procs} "
+                f"--only-count-success "
+            )
+            if args.save_video:
+                cmd_gen += "--save-video "
+            run_command(cmd_gen)
+
+            cmd_replay = (
+                f"python -m mani_skill.trajectory.replay_trajectory "
+                f"-b {args.sim_backend_replay} "
+                f"--traj-path \"{raw_traj_path}\" "
+                f"--use-first-env-state "
+                f"-c {args.control_mode} "
+                f"-o {args.obs_mode} "
+                f"--num-envs {batch_num_procs} "
+                f"--save-traj "
+            )
+            if args.save_video:
+                cmd_replay += "--save-video "
+            run_command(cmd_replay)
+
+            if not os.path.exists(replayed_traj_path):
+                print(f"Warning: Expected output file not found: {replayed_traj_path}")
+                break
+
+            batch_replay_count = load_episode_count(replayed_json_path)
+            print(
+                f"Replay kept {batch_replay_count}/{remaining} demos for {task['name']} "
+                f"in batch {batch_idx}"
+            )
+            if batch_replay_count > 0:
+                robot_replayed_files.append(replayed_traj_path)
+                remaining -= batch_replay_count
+
+            next_seed_start = load_max_seed(raw_json_path) + 1
+
+        if len(robot_replayed_files) == 0:
+            print(f"Warning: no replay-success files collected for {task['name']}")
+            continue
+
+        robot_merged_path = f"demos/{task['env']}/motionplanning/{task['name']}_{task['env']}.{suffix}.h5"
+        if len(robot_replayed_files) == 1:
+            replayed_files.append(robot_replayed_files[0])
         else:
-            print(f"Warning: Expected output file not found: {replayed_traj_path}")
+            print(
+                f"Merging {len(robot_replayed_files)} replay batches for {task['name']} "
+                f"into {robot_merged_path}"
+            )
+            merge_trajectories(robot_merged_path, robot_replayed_files)
+            replayed_files.append(robot_merged_path)
 
     # 4. 合并所有文件
-    merged_file_path = os.path.join(os.path.dirname(replayed_files[0]), args.output_filename)
-    print(f"\n=== Merging {len(replayed_files)} files into {merged_file_path} ===")
     if len(replayed_files) > 0:
+        merged_file_path = os.path.join(
+            os.path.dirname(replayed_files[0]), args.output_filename
+        )
+        print(f"\n=== Merging {len(replayed_files)} files into {merged_file_path} ===")
         try:
             merge_trajectories(merged_file_path, replayed_files)
             print(f"Successfully created {merged_file_path}")

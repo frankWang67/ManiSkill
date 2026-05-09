@@ -235,12 +235,13 @@ class OpenDoorEnv(BaseEnv):
         self.closed_qpos = qmin
 
         deg10 = torch.full_like(qmin, np.deg2rad(10))
+        deg30 = torch.full_like(qmin, np.deg2rad(30))
         deg40 = torch.full_like(qmin, np.deg2rad(40))
         deg55 = torch.full_like(qmin, np.deg2rad(55))
         deg70 = torch.full_like(qmin, np.deg2rad(70))
         deg80 = torch.full_like(qmin, np.deg2rad(80))
         deg8 = torch.full_like(qmin, np.deg2rad(8))
-        success = torch.minimum(qmin + open_range * 0.60, qmin + deg40)
+        success = torch.minimum(qmin + open_range * 0.50, qmin + deg30)
         success = torch.maximum(success, qmin + deg10)
         success = torch.minimum(success, qmax - 1e-3)
         self.success_qpos = success

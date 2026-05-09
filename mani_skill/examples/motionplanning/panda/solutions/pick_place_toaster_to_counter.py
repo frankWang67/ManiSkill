@@ -7,12 +7,140 @@ from mani_skill.examples.motionplanning.panda.motionplanner import (
 )
 
 ROTATE_25_DEG = -35 * np.pi / 180.0
+RRT_REPLAN_ATTEMPTS = 8
+MAX_RRT_PLAN_STEPS = 140
+MAX_RRT_CUM_JOINT_TRAVEL_BASE = 1.8
+MAX_RRT_CUM_JOINT_TRAVEL_PER_M = 8.0
+MAX_RRT_CUM_JOINT_TRAVEL_PER_RAD = 1.8
+MAX_RRT_MAX_STEP = 0.12
+MAX_RRT_DETOUR_RATIO = 3.0
+
+
+def _to_sapien_pose(pose):
+    if hasattr(pose, "sp"):
+        return pose.sp
+    return pose
+
+
+def _quat_angle_distance(q0: np.ndarray, q1: np.ndarray) -> float:
+    q0 = np.asarray(q0, dtype=np.float64)
+    q1 = np.asarray(q1, dtype=np.float64)
+    q0 = q0 / (np.linalg.norm(q0) + 1e-12)
+    q1 = q1 / (np.linalg.norm(q1) + 1e-12)
+    cos_half = np.clip(np.abs(np.dot(q0, q1)), 0.0, 1.0)
+    return float(2.0 * np.arccos(cos_half))
+
+
+def _path_metrics(result):
+    qpos = np.asarray(result["position"], dtype=np.float64)
+    if qpos.shape[0] <= 1:
+        return dict(
+            steps=int(qpos.shape[0]),
+            cum_joint=0.0,
+            direct_joint=0.0,
+            max_step=0.0,
+            detour_ratio=1.0,
+        )
+
+    step_norms = np.linalg.norm(np.diff(qpos, axis=0), axis=1)
+    cum_joint = float(step_norms.sum())
+    direct_joint = float(np.linalg.norm(qpos[-1] - qpos[0]))
+    return dict(
+        steps=int(qpos.shape[0]),
+        cum_joint=cum_joint,
+        direct_joint=direct_joint,
+        max_step=float(step_norms.max()),
+        detour_ratio=float(cum_joint / max(direct_joint, 1e-6)),
+    )
+
+
+def _plan_rrt_result(planner: PandaArmMotionPlanningSolver, pose: sapien.Pose):
+    pose = _to_sapien_pose(pose)
+    planner._update_grasp_visual(pose)
+    pose = planner._transform_pose_for_planning(pose)
+    return planner.planner.plan_qpos_to_pose(
+        np.concatenate([pose.p, pose.q]),
+        planner._get_ik_seed_qpos(),
+        time_step=planner.base_env.control_timestep,
+        use_point_cloud=planner.use_point_cloud,
+        rrt_range=0.0,
+        planning_time=1,
+        planner_name="RRTConnect",
+        wrt_world=True,
+    )
+
+
+def _rrt_plan_is_reasonable(
+    planner: PandaArmMotionPlanningSolver,
+    pose: sapien.Pose,
+    result,
+):
+    metrics = _path_metrics(result)
+
+    current_tcp_pose = _to_sapien_pose(getattr(planner.env_agent, "tcp_pose", None))
+    if current_tcp_pose is None:
+        current_tcp_pose = _to_sapien_pose(planner.env_agent.tcp.pose)
+    target_pose = _to_sapien_pose(pose)
+
+    cart_delta = float(
+        np.linalg.norm(
+            np.asarray(target_pose.p, dtype=np.float64)
+            - np.asarray(current_tcp_pose.p, dtype=np.float64)
+        )
+    )
+    rot_delta = _quat_angle_distance(
+        np.asarray(target_pose.q, dtype=np.float64),
+        np.asarray(current_tcp_pose.q, dtype=np.float64),
+    )
+    max_cum_joint = (
+        MAX_RRT_CUM_JOINT_TRAVEL_BASE
+        + MAX_RRT_CUM_JOINT_TRAVEL_PER_M * cart_delta
+        + MAX_RRT_CUM_JOINT_TRAVEL_PER_RAD * rot_delta
+    )
+
+    return (
+        metrics["steps"] <= MAX_RRT_PLAN_STEPS
+        and metrics["cum_joint"] <= max_cum_joint
+        and metrics["max_step"] <= MAX_RRT_MAX_STEP
+        and (
+            metrics["detour_ratio"] <= MAX_RRT_DETOUR_RATIO
+            or metrics["cum_joint"] <= 1.0
+        )
+    ), metrics
+
+
+def _best_rrt_plan_without_loop(planner: PandaArmMotionPlanningSolver, pose: sapien.Pose):
+    best_result = None
+    best_metrics = None
+
+    for _ in range(RRT_REPLAN_ATTEMPTS):
+        result = _plan_rrt_result(planner, pose)
+        if result["status"] != "Success":
+            continue
+
+        is_reasonable, metrics = _rrt_plan_is_reasonable(planner, pose, result)
+        if not is_reasonable:
+            continue
+
+        if best_result is None or metrics["cum_joint"] < best_metrics["cum_joint"]:
+            best_result = result
+            best_metrics = metrics
+
+    return best_result
 
 def _move(planner: PandaArmMotionPlanningSolver, pose: sapien.Pose):
     res = planner.move_to_pose_with_screw(pose)
-    if res == -1:
-        res = planner.move_to_pose_with_RRTConnect(pose)
-    return res
+    if res != -1:
+        return res
+
+    rrt_result = _best_rrt_plan_without_loop(planner, pose)
+    if rrt_result is None:
+        if planner.debug:
+            print("Rejecting RRTConnect plan: no non-looping trajectory found")
+        return -1
+
+    planner.render_wait()
+    return planner.follow_path(rrt_result)
 
 
 def solve(
