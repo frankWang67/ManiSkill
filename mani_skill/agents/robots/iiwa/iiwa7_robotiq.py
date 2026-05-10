@@ -40,9 +40,9 @@ class IIwa7RobotiqWristCamera(BaseAgent):
                     0.0,
                     0.0,
                     0.0,
-                    -1.57,
+                    -1.57 - 0.2,
                     0.0,
-                    1.57,
+                    1.57 - 0.2,
                     0.0,
 
                     0.0,

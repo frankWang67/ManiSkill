@@ -36,13 +36,13 @@ class Rizon4RobotiqWristCamera(BaseAgent):
         rest=Keyframe(
             qpos=np.array(
                 [
-                    0.0,
+                    0.3,
                     0.3,
                     0.0,
                     1.87,
                     0.0,
                     0.0,
-                    0.0,
+                    0.3,
 
                     0.0,
                     0.0,

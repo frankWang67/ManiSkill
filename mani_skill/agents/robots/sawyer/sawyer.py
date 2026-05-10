@@ -37,13 +37,13 @@ class SawyerRobotiqWristCamera(BaseAgent):
         rest=Keyframe(
             qpos=np.array(
                 [
+                    -0.3,
+                    -1.57 - 0.3,
                     0.0,
-                    -1.57,
+                    1.57 + 0.1,
                     0.0,
-                    1.57,
-                    0.0,
-                    1.57,
-                    0.0,
+                    1.57 + 0.2,
+                    -0.12,
 
                     0.0,
                     0.0,
