@@ -86,11 +86,13 @@ class OpenDoorEnv(BaseEnv):
     TRAIN_JSON = PACKAGE_ASSET_DIR / "partnet_mobility/meta/info_cabinet_door_train.json"
     handle_types = ["revolute", "revolute_unwrapped"]
 
+    harder_robot_obstacle_contact_force_thresh = 1e-2
+
     def __init__(
         self,
         *args,
         robot_uids="panda_robotiq_wristcam",
-        robot_init_qpos_noise=0.02,
+        robot_init_qpos_noise=0.05,
         harder: bool = False,
         model_id: Optional[str] = None,
         reconfiguration_freq=None,
@@ -290,6 +292,11 @@ class OpenDoorEnv(BaseEnv):
         with torch.device(self.device):
             b = len(env_idx)
             self.table_scene.initialize(env_idx)
+            if not hasattr(self, "episode_failed"):
+                self.episode_failed = torch.zeros(
+                    self.num_envs, device=self.device, dtype=torch.bool
+                )
+            self.episode_failed[env_idx] = False
 
             p = torch.zeros((b, 3), device=self.device)
             p[:, 0] = torch.rand((b), device=self.device) * 0.06 + 0.15
@@ -321,6 +328,8 @@ class OpenDoorEnv(BaseEnv):
                 robot_to_handle_dir = robot_to_handle / torch.linalg.norm(robot_to_handle, dim=1, keepdim=True)
                 ortho_dir = torch.cross(robot_to_handle_dir, torch.tensor([0.0, 0.0, 1.0], device=self.device).expand_as(robot_to_handle_dir))
                 wall_center = robot_pos * 0.60 + handle * 0.40 + ortho_dir * 0.4
+                wall_center[:, 0] += 0.1
+                # wall_center[:, 1] -= 0.05
                 wall_center[:, 2] = self.obstacle_half_sizes[0][2] + 1e-3
 
                 wall_q = torch.zeros((b, 4), device=self.device, dtype=torch.float32)
@@ -356,6 +365,9 @@ class OpenDoorEnv(BaseEnv):
             hinge_axis=self.hinge_axis,
         )
 
+    def get_obstacle_actors(self):
+        return list(self.obstacles)
+
     def get_obstacles_info(self):
         obstacles_info = []
         if not self.harder:
@@ -374,13 +386,36 @@ class OpenDoorEnv(BaseEnv):
             }
             obstacles_info.append(obs_info)
         return obstacles_info
+    
+    def _compute_robot_harder_obstacle_collision(self):
+        fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        max_contact_force = torch.zeros(self.num_envs, device=self.device)
+        if not self.harder:
+            return fail, max_contact_force
+
+        for obstacle in self.obstacles:
+            for link in self.agent.robot.get_links():
+                contact_force = torch.linalg.norm(
+                    self.scene.get_pairwise_contact_forces(link, obstacle), axis=1
+                )
+                max_contact_force = torch.maximum(max_contact_force, contact_force)
+
+        fail = max_contact_force > self.harder_robot_obstacle_contact_force_thresh
+        return fail, max_contact_force
 
     def evaluate(self):
         self._update_task_kinematics()
         door_joint_pos = self.current_angle
         open_enough = door_joint_pos >= self.success_qpos
+        current_fail, robot_obstacle_contact_force = (
+            self._compute_robot_harder_obstacle_collision()
+        )
+        self.episode_failed = torch.logical_or(self.episode_failed, current_fail)
+        fail = self.episode_failed
+        success = torch.logical_and(open_enough, ~fail)
         return {
-            "success": open_enough,
+            "success": success,
+            "fail": fail,
             "open_enough": open_enough,
             "door_joint_pos": door_joint_pos,
             "target_open_angle": self.success_qpos,

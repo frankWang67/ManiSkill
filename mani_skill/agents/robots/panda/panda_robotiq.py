@@ -37,11 +37,11 @@ class PandaRobotiqWristCamera(BaseAgent):
             qpos=np.array(
                 [
                     0.0,
-                    -np.pi / 8,
+                    -0.5, # -np.pi / 8,
                     0.0,
-                    -np.pi * 5 / 8,
+                    -2.3, # -np.pi * 5 / 8,
                     0.0,
-                    np.pi / 2,
+                    1.8, # np.pi / 2,
                     0.0,
 
                     0.0,

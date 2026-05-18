@@ -101,7 +101,7 @@ class PickPlaceToasterToCounterEnv(BaseEnv):
         self,
         *args,
         robot_uids="panda_robotiq_wristcam",
-        robot_init_qpos_noise=0.02,
+        robot_init_qpos_noise=0.05,
         harder: bool = False,
         **kwargs,
     ):
@@ -697,6 +697,12 @@ class PickPlaceToasterToCounterEnv(BaseEnv):
             "is_grasped": is_grasped,
             "robot_obstacle_contact_force": robot_obstacle_contact_force,
         }
+
+    def get_obstacle_actors(self):
+        actors = list(self.toaster_obstacles)
+        if self.harder:
+            actors.extend(self.harder_obstacles)
+        return actors
 
     def get_obstacles_info(self):
         robot_root_inv = self.agent.robot.get_pose().inv()

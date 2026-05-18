@@ -137,21 +137,43 @@ class TableSceneBuilder(SceneBuilder):
             "panda_robotiq_wristcam",
             "floating_robotiq_2f_85_gripper",
             "floating_robotiq_2f_85_gripper_wristcam",
-            "iiwa7_robotiq_wristcam",
             "gen3_6dof_robotiq_wristcam",
             "gen3_7dof_robotiq_wristcam",
             "rizon4_robotiq_wristcam",
+        ]:
+            qpos = self.env.agent.keyframes["rest"].qpos
+            qpos = (
+                self.env._episode_rng.normal(
+                    0, self.robot_init_qpos_noise, (b, len(qpos))
+                )
+                + qpos
+            )
+            self.env.agent.reset(qpos)
+            self.env.agent.robot.set_pose(sapien.Pose([-0.522, 0, 0]))
+        elif self.env.robot_uids in [
+            "iiwa7_robotiq_wristcam",
+        ]:
+            qpos = self.env.agent.keyframes["rest"].qpos
+            qpos = (
+                self.env._episode_rng.normal(
+                    0, self.robot_init_qpos_noise, (b, len(qpos))
+                )
+                + qpos
+            )
+            self.env.agent.reset(qpos)
+            self.env.agent.robot.set_pose(sapien.Pose([-0.622, 0, 0]))
+        elif self.env.robot_uids in [
             "sawyer_robotiq_wristcam",
         ]:
             qpos = self.env.agent.keyframes["rest"].qpos
-            # qpos = (
-            #     self.env._episode_rng.normal(
-            #         0, self.robot_init_qpos_noise, (b, len(qpos))
-            #     )
-            #     + qpos
-            # )
+            qpos = (
+                self.env._episode_rng.normal(
+                    0, self.robot_init_qpos_noise, (b, len(qpos))
+                )
+                + qpos
+            )
             self.env.agent.reset(qpos)
-            self.env.agent.robot.set_pose(sapien.Pose([-0.522, 0, 0]))
+            self.env.agent.robot.set_pose(sapien.Pose([-0.722, 0, 0]))
         elif self.env.robot_uids == "fetch":
             qpos = np.array(
                 [

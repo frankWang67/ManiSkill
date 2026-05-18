@@ -38,11 +38,11 @@ class SawyerRobotiqWristCamera(BaseAgent):
             qpos=np.array(
                 [
                     -0.3,
-                    -1.57 - 0.3,
+                    -1.57 + 0.1,
                     0.0,
-                    1.57 + 0.1,
+                    1.57 - 0.1,
                     0.0,
-                    1.57 + 0.2,
+                    1.57,
                     -0.12,
 
                     0.0,
@@ -56,6 +56,8 @@ class SawyerRobotiqWristCamera(BaseAgent):
             pose=sapien.Pose(p=[0, 0, 0]),
         )
     )
+
+    disable_self_collisions = True
 
     def __init__(self, *args, **kwargs):
         self.arm_joint_names = [

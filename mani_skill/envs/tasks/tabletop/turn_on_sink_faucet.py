@@ -72,7 +72,7 @@ class TurnOnSinkFaucetEnv(BaseEnv):
         "rizon4_robotiq_wristcam",
         "sawyer_robotiq_wristcam",
     ]
-    SUPPORTED_REWARD_MODES = ["sparse", "dense", "none"]
+    SUPPORTED_REWARD_MODES = ["sparse", "dense", "normalized_dense", "none"]
     agent: Union[
         PandaRobotiqWristCamera,
         UR5RobotiqWristCamera,
@@ -86,11 +86,13 @@ class TurnOnSinkFaucetEnv(BaseEnv):
         SawyerRobotiqWristCamera,
     ]
 
+    harder_robot_obstacle_contact_force_thresh = 1e-2
+
     def __init__(
         self,
         *args,
         robot_uids="panda_robotiq_wristcam",
-        robot_init_qpos_noise=0.02,
+        robot_init_qpos_noise=0.05,
         harder: bool = False,
         reconfiguration_freq=None,
         num_envs=1,
@@ -150,20 +152,35 @@ class TurnOnSinkFaucetEnv(BaseEnv):
 
     def _initialize_robot(self, env_idx: torch.Tensor):
         b = len(env_idx)
-        rest_qpos = self.agent.keyframes["rest"].qpos
-        if isinstance(rest_qpos, torch.Tensor):
-            qpos = rest_qpos.clone().to(self.device).repeat(b, 1)
-        else:
-            qpos = torch.tensor(rest_qpos, dtype=torch.float32, device=self.device).repeat(
-                b, 1
+        qpos = self.agent.keyframes["rest"].qpos
+        # if isinstance(rest_qpos, torch.Tensor):
+        #     qpos = rest_qpos.clone().to(self.device).repeat(b, 1)
+        # else:
+        #     qpos = torch.tensor(rest_qpos, dtype=torch.float32, device=self.device).repeat(
+        #         b, 1
+        #     )
+        qpos = (
+            self._episode_rng.normal(
+                0, self.robot_init_qpos_noise, (b, len(qpos))
             )
+            + qpos
+        )
         self.agent.reset(qpos)
         # robot_p = torch.tensor(
         #     [[1.18, -0.80, 0.6]], dtype=torch.float32, device=self.device
         # ).repeat(b, 1)
-        robot_p = torch.tensor(
-            [[1.3, -0.80, 0.6]], dtype=torch.float32, device=self.device
-        ).repeat(b, 1)
+        if self.robot_uids in ["sawyer_robotiq_wristcam"]:
+            robot_p = torch.tensor(
+                [[1.35, -0.90, 0.6]], dtype=torch.float32, device=self.device
+            ).repeat(b, 1)
+        elif self.robot_uids in ["iiwa7_robotiq_wristcam"]:
+            robot_p = torch.tensor(
+                [[1.3, -0.90, 0.6]], dtype=torch.float32, device=self.device
+            ).repeat(b, 1)
+        else:
+            robot_p = torch.tensor(
+                [[1.3, -0.80, 0.6]], dtype=torch.float32, device=self.device
+            ).repeat(b, 1)
         robot_q = torch.tensor([[np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)]], dtype=torch.float32, device=self.device).repeat(b, 1)
         self.agent.robot.set_pose(Pose.create_from_pq(p=robot_p, q=robot_q))
 
@@ -295,9 +312,14 @@ class TurnOnSinkFaucetEnv(BaseEnv):
             b = len(env_idx)
             self.scene_builder.initialize(env_idx)
             self._initialize_robot(env_idx)
+            if not hasattr(self, "episode_failed"):
+                self.episode_failed = torch.zeros(
+                    self.num_envs, device=self.device, dtype=torch.bool
+                )
+            self.episode_failed[env_idx] = False
 
             qpos = self.faucet.get_qpos()
-            qpos[env_idx, 0] = 0.0
+            qpos[env_idx, 0] = 0.3
             qpos[env_idx, 1] = 0.0
             qpos[env_idx, 2] = 0.0
             self.faucet.set_qpos(qpos)
@@ -382,6 +404,9 @@ class TurnOnSinkFaucetEnv(BaseEnv):
             handle_dir=self.handle_dir,
         )
 
+    def get_obstacle_actors(self):
+        return list(self.extra_obstacles)
+
     def get_obstacles_info(self):
         obstacles_info = []
         if self.harder:
@@ -401,6 +426,22 @@ class TurnOnSinkFaucetEnv(BaseEnv):
                     }
                 )
         return obstacles_info
+    
+    def _compute_robot_harder_obstacle_collision(self):
+        fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        max_contact_force = torch.zeros(self.num_envs, device=self.device)
+        if not self.harder:
+            return fail, max_contact_force
+
+        for obstacle in self.extra_obstacles:
+            for link in self.agent.robot.get_links():
+                contact_force = torch.linalg.norm(
+                    self.scene.get_pairwise_contact_forces(link, obstacle), axis=1
+                )
+                max_contact_force = torch.maximum(max_contact_force, contact_force)
+
+        fail = max_contact_force > self.harder_robot_obstacle_contact_force_thresh
+        return fail, max_contact_force
 
     def evaluate(self):
         self._update_task_kinematics()
@@ -410,8 +451,16 @@ class TurnOnSinkFaucetEnv(BaseEnv):
             faucet_joint_pos_wrapped > self.success_qpos,
             faucet_joint_pos_wrapped < torch.full_like(faucet_joint_pos_wrapped, np.pi),
         )
+        current_fail, robot_obstacle_contact_force = (
+            self._compute_robot_harder_obstacle_collision()
+        )
+        self.episode_failed = torch.logical_or(self.episode_failed, current_fail)
+        fail = self.episode_failed
+        success = torch.logical_and(faucet_on, ~fail)
         return {
-            "success": faucet_on,
+            "success": success,
+            "fail": fail,
+            "current_fail": current_fail,
             "faucet_on": faucet_on,
             "faucet_joint_pos": faucet_joint_pos,
             "target_on_angle": self.success_qpos,

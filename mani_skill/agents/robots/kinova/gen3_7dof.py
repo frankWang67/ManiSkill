@@ -37,13 +37,13 @@ class Gen37DofRobotiqWristCamera(BaseAgent):
         rest=Keyframe(
             qpos=np.array(
                 [
-                    -0.2,
+                    0.0,
                     0.2,
                     0.0,
-                    np.pi / 2 - 0.4,
+                    np.pi / 2 - 0.3,
                     0.0,
-                    np.pi / 2 + 0.2,
-                    -0.2,
+                    np.pi / 2 + 0.1,
+                    0.0,
 
                     0.0,
                     0.0,

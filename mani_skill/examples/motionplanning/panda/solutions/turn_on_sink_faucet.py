@@ -16,7 +16,7 @@ RETURN_HOME_STEPS = 30
 DETOUR_PROB = 0.85
 DETOUR_ATTEMPTS = 6
 DETOUR_BACKOFF_RANGE = (0.03, 0.07)
-DETOUR_WORLD_X_RANGE = (-0.05, 0.25)
+DETOUR_WORLD_X_RANGE = (-0.10, 0.10)
 DETOUR_WORLD_Y_RANGE = (-0.15, 0.15)
 DETOUR_LIFT_RANGE = (0.01, 0.04)
 
@@ -129,13 +129,17 @@ def _compute_turn_plan(env):
     hinge_axis = _normalize(_first_batch_np(kinematics["hinge_axis"]))
 
     approaching = hinge_axis
-    approaching[2] = -0.5
+    # approaching[2] = -0.5
+    approaching[2] = np.random.uniform(-0.9, -0.5)
+    approaching[0] = np.random.uniform(-0.5, 0.5)
     approaching = _normalize(approaching)
 
     radial = handle_pos - hinge_pos
     radial = radial - hinge_axis * np.dot(radial, hinge_axis)
 
-    closing = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    # closing = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    closing = np.array([approaching[1], -approaching[0], 0.0], dtype=np.float64)
+    closing = _normalize(closing)
 
     grasp_center = handle_pos.copy()
     grasp_center[0] -= 0.02
@@ -172,7 +176,7 @@ def _turn_faucet(env, planner, turn_plan):
         target_center = (
             turn_plan["handle_pos"]
             + _rotate_about_axis(turn_plan["shaft_rel"], turn_plan["hinge_axis"], angle)
-            + turn_plan["closing"] * 0.02
+            + turn_plan["closing"] * 0.025
         )
         closing = _rotate_about_axis(turn_plan["closing"], turn_plan["hinge_axis"], angle * 0.5)
         target_pose = env.agent.build_grasp_pose(turn_plan["approaching"], closing, target_center)

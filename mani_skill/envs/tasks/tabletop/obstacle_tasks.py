@@ -184,8 +184,11 @@ class PickFromDeepBoxEnv(PickCubeEnv):
                 'extent': torch.tensor(extent, device=current_pose.device).expand(current_pose.shape[0], 3) # (B, 3) 动态读取的尺寸
             }
             obstacles_info.append(obs_info)
-            
+
         return obstacles_info
+
+    def get_obstacle_actors(self):
+        return list(self.box_walls)
 
 # =============================================================================
 # Task 2: PickFromShelf (Shelf Picking)
@@ -350,8 +353,11 @@ class PickFromShelfEnv(PickCubeEnv):
                 'extent': torch.tensor(extent, device=current_pose.device).expand(current_pose.shape[0], 3) # (B, 3) 动态读取的尺寸
             }
             obstacles_info.append(obs_info)
-            
+
         return obstacles_info
+
+    def get_obstacle_actors(self):
+        return list(self.shelf_parts)
 
 # =============================================================================
 # Task 3: PickBehindBarrier (Barrier Picking)
@@ -428,7 +434,7 @@ class PickBehindBarrierEnv(PickCubeEnv):
             barrier_x = torch.rand(b) * 0.05 - 0.1
             
             if self.harder:
-                target_height = torch.ones((b, 1)) * 0.32
+                target_height = torch.ones((b, 1)) * 0.28
             else:
                 target_height = torch.rand((b, 1)) * 0.1 + 0.15
             barrier_z = target_height - self.barrier_half_height
@@ -488,5 +494,8 @@ class PickBehindBarrierEnv(PickCubeEnv):
             'extent': torch.tensor(extent, device=current_pose.device).expand(current_pose.shape[0], 3) # (B, 3) 动态读取的尺寸
         }
         obstacles_info.append(obs_info)
-            
+
         return obstacles_info
+
+    def get_obstacle_actors(self):
+        return [self.barrier]

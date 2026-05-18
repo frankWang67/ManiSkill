@@ -91,20 +91,22 @@ class MakeIcedCoffeeEnv(BaseEnv):
     # Tall wall to block the lifted transport trajectory (TCP z ≥ 0.26).
     # Half-sizes: [thin along path, wide perpendicular to path, tall].
     taller_transport_half_sizes = [
-        [0.015, 0.09, 0.15],
+        [0.015, 0.12, 0.15],
     ]
+
+    harder_robot_obstacle_contact_force_thresh = 1e-2
 
     def __init__(
         self,
         *args,
         robot_uids="panda_robotiq_wristcam",
-        robot_init_qpos_noise=0.02,
+        robot_init_qpos_noise=0.05,
         harder: bool = False,
         **kwargs,
     ):
         self.robot_init_qpos_noise = robot_init_qpos_noise
         self.harder = harder
-        self.ice_cube_half_size = 0.012
+        self.ice_cube_half_size = 0.015
         self.dish_inner_radius = 0.06
         self.dish_wall_thickness = 0.004
         self.dish_inner_height = 0.018
@@ -365,10 +367,15 @@ class MakeIcedCoffeeEnv(BaseEnv):
         with torch.device(self.device):
             b = len(env_idx)
             self.table_scene.initialize(env_idx)
+            if not hasattr(self, "episode_failed"):
+                self.episode_failed = torch.zeros(
+                    self.num_envs, device=self.device, dtype=torch.bool
+                )
+            self.episode_failed[env_idx] = False
 
             dish_base_pos = torch.zeros((b, 3), device=self.device)
-            dish_base_pos[:, 0] = torch.rand((b), device=self.device) * 0.04
-            dish_base_pos[:, 1] = (torch.rand((b), device=self.device) - 0.5) * 0.12 - 0.18
+            dish_base_pos[:, 0] = torch.rand((b), device=self.device) * 0.04 - 0.08
+            dish_base_pos[:, 1] = (torch.rand((b), device=self.device) - 0.5) * 0.12 - 0.30
             dish_base_pos[:, 2] = 0
             dish_q = randomization.random_quaternions(
                 n=b, device=self.device, lock_x=True, lock_y=True
@@ -380,11 +387,11 @@ class MakeIcedCoffeeEnv(BaseEnv):
 
             cup_offset = torch.zeros((b, 2), device=self.device)
             cup_offset[:, 0] = torch.rand((b), device=self.device) * 0.04 + 0.03
-            cup_offset[:, 1] = torch.rand((b), device=self.device) * 0.10 + 0.32
+            cup_offset[:, 1] = torch.rand((b), device=self.device) * 0.10 + 0.48
             cup_base_pos = torch.zeros((b, 3), device=self.device)
             cup_base_pos[:, :2] = dish_base_pos[:, :2] + cup_offset
             cup_base_pos[:, 0] = torch.clamp(cup_base_pos[:, 0], min=0.02, max=0.22)
-            cup_base_pos[:, 1] = torch.clamp(cup_base_pos[:, 1], min=0.10, max=0.32)
+            cup_base_pos[:, 1] = torch.clamp(cup_base_pos[:, 1], min=0.10, max=0.36)
             cup_base_pos[:, 2] = 0
             cup_q = randomization.random_quaternions(
                 n=b, device=self.device, lock_x=True, lock_y=True
@@ -549,6 +556,9 @@ class MakeIcedCoffeeEnv(BaseEnv):
         )
         return torch.logical_and(inside_xy, inside_z)
 
+    def get_obstacle_actors(self):
+        return list(self.harder_pick_place_obstacles) + list(self.taller_transport_obstacles)
+
     def get_obstacles_info(self):
         if not self.harder:
             return []
@@ -583,13 +593,36 @@ class MakeIcedCoffeeEnv(BaseEnv):
                 )
             )
         return obstacles_info
+    
+    def _compute_robot_harder_obstacle_collision(self):
+        fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        max_contact_force = torch.zeros(self.num_envs, device=self.device)
+        if not self.harder:
+            return fail, max_contact_force
+
+        for obstacle in self.harder_pick_place_obstacles + self.taller_transport_obstacles:
+            for link in self.agent.robot.get_links():
+                contact_force = torch.linalg.norm(
+                    self.scene.get_pairwise_contact_forces(link, obstacle), axis=1
+                )
+                max_contact_force = torch.maximum(max_contact_force, contact_force)
+
+        fail = max_contact_force > self.harder_robot_obstacle_contact_force_thresh
+        return fail, max_contact_force
 
     def evaluate(self):
         is_ice_in_cup = self._compute_ice_in_cup()
         is_grasped = self.agent.is_grasping(self.ice_cube)
+        current_fail, robot_obstacle_contact_force = (
+            self._compute_robot_harder_obstacle_collision()
+        )
+        self.episode_failed = torch.logical_or(self.episode_failed, current_fail)
+        fail = self.episode_failed
         success = torch.logical_and(is_ice_in_cup, ~is_grasped)
+        success = torch.logical_and(success, ~fail)
         return {
             "success": success,
+            "fail": fail,
             "is_ice_in_cup": is_ice_in_cup,
             "is_grasped": is_grasped,
         }
