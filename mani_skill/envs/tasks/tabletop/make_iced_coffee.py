@@ -154,7 +154,7 @@ class MakeIcedCoffeeEnv(BaseEnv):
     @property
     def _default_human_render_camera_configs(self):
         # pose = sapien_utils.look_at(eye=[-0.95, 0.95, 0.78], target=[0.1, 0.02, 0.08])
-        pose = sapien_utils.look_at(eye=[0.7, 0.7, 0.7], target=[0.1, 0.02, 0.08])
+        pose = sapien_utils.look_at(eye=[0.7, 0.7, 0.7], target=[0.0, 0.0, 0.3])
         return CameraConfig(
             "render_camera", pose=pose, width=512, height=512, fov=1, near=0.01, far=100
         )

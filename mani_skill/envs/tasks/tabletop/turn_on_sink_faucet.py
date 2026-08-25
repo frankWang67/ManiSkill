@@ -136,12 +136,12 @@ class TurnOnSinkFaucetEnv(BaseEnv):
         # pose = sapien_utils.look_at(
         #     eye=[1.46, -1.60, 1.50], target=[1.24, -0.42, 0.96]
         # )
-        pose = sapien_utils.look_at(
-            eye=[2.06, -0.50, 1.20], target=[1.24, -0.42, 0.96]
-        )
         # pose = sapien_utils.look_at(
-        #     eye=[0.66, -0.50, 1.20], target=[1.24, -0.42, 0.96]
+        #     eye=[2.26, -0.60, 1.20], target=[1.24, -0.52, 0.96]
         # )
+        pose = sapien_utils.look_at(
+            eye=[0.56, -0.60, 1.20], target=[1.24, -0.42, 0.96]
+        )
         return CameraConfig(
             "render_camera", pose=pose, width=512, height=512, fov=1.0, near=0.01, far=100
         )

@@ -189,7 +189,7 @@ class PickPlaceToasterToCounterEnv(BaseEnv):
     @property
     def _default_human_render_camera_configs(self):
         pose = sapien_utils.look_at(
-            eye=[-0.92, 0.92, 0.78], target=[0.05, -0.06, 0.08]
+            eye=[-0.8, 1.0, 0.8], target=[-0.2, 0.0, 0.2]
         )
         return CameraConfig(
             "render_camera",
