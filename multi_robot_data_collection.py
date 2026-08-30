@@ -12,10 +12,26 @@ from mani_skill.trajectory.merge_trajectory import merge_trajectories
 
 SCRIPT_PATH = "mani_skill/examples/motionplanning/panda/run.py"
 
+ROBOT_TASKS = {
+    "panda_robotiq_wristcam": "panda",
+    "xarm6_robotiq_wristcam": "xarm6",
+    "xarm7_robotiq_wristcam": "xarm7",
+    "ur5_robotiq_wristcam": "ur5",
+    "floating_robotiq_2f_85_gripper_wristcam": "floating_robotiq",
+}
+DEFAULT_ROBOT_UIDS = ["floating_robotiq_2f_85_gripper_wristcam"]
+
 parser = ArgumentParser(description="Multi-Robot Data Collection via Motion Planning and Replay")
 parser.add_argument("--env", "-e", type=str, help="Environment ID")
 parser.add_argument("--output-filename", "-f", type=str, help="Final merged output filename")
 parser.add_argument("--traj-num", "-n", type=int, default=20, help="Number of trajectories to collect per robot")
+parser.add_argument(
+    "--robot-uids",
+    nargs="+",
+    default=DEFAULT_ROBOT_UIDS,
+    choices=tuple(ROBOT_TASKS),
+    help="Robot UIDs used for demonstration collection (default: floating Robotiq only)",
+)
 parser.add_argument("--obs-mode", "-o", type=str, default="rgb", help="Observation mode for replay")
 parser.add_argument("--control-mode", "-c", type=str, default="pd_ee_delta_pose", help="Control mode for replay")
 parser.add_argument("--sim-backend-gen", type=str, default="physx_cpu", help="Simulation backend for trajectory generation")
@@ -24,43 +40,15 @@ parser.add_argument("--save-video", action="store_true", help="Whether to save v
 parser.add_argument("--num-procs", type=int, default=1, help="Number of parallel processes for motion planning and trajectory replay")
 args = parser.parse_args()
 
-# ================= 配置区域 =================
-# 在这里定义你想采集的所有机器人配置
-# 注意：请确保 script 路径和 robot_uid 是正确的
 tasks = [
     {
-        "name": "panda",
+        "name": ROBOT_TASKS[robot_uid],
         "env": args.env,
-        "robot_uid": "panda_robotiq_wristcam",
-        "script_path": SCRIPT_PATH
-    },
-    {
-        "name": "xarm6",
-        "env": args.env,
-        "robot_uid": "xarm6_robotiq_wristcam",
-        "script_path": SCRIPT_PATH
-    },
-    {
-        "name": "xarm7",
-        "env": args.env,
-        "robot_uid": "xarm7_robotiq_wristcam",
-        "script_path": SCRIPT_PATH
-    },
-    {
-        "name": "ur5",
-        "env": args.env,
-        "robot_uid": "ur5_robotiq_wristcam",
-        "script_path": SCRIPT_PATH
-    },
-    {
-        "name": "floating_robotiq",
-        "env": args.env,
-        "robot_uid": "floating_robotiq_2f_85_gripper_wristcam",
-        "script_path": SCRIPT_PATH
-    },
+        "robot_uid": robot_uid,
+        "script_path": SCRIPT_PATH,
+    }
+    for robot_uid in args.robot_uids
 ]
-
-# ===========================================
 
 def run_command(cmd):
     print(f"Executing: {cmd}")
